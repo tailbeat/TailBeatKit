@@ -10,94 +10,29 @@ import Network
 import OSLog
 import UniformTypeIdentifiers
 
-enum TailBeatLevel: Int, Codable {
-    case Trace = 0
-    case Debug = 1
-    case Info = 2
-    case Warning = 3
-    case Error = 4
-    case Fatal = 5
-}
 
-enum TailBeatEventType: Int, Codable {
-    case Log = 0
-    case AppStarted = 1
-    case AppExited = 2
-}
 
-enum TailBeatExtras: Int, Codable {
-    case Highlight = 0
-    case NewStart = 1
-    case StackTrace = 2
-}
 
-enum TailBeatLogSource: Int, Codable {
-    case Stdout = 0
-    case Stderr = 1
-    case OSLog = 2
-    case TailBeat = 3
-}
+extension LogStream: @unchecked Sendable {}
 
-struct TailBeatEvent: Codable, Identifiable {
-    var id: UUID = UUID()
-    
-    let timestamp: Date
-    let type: TailBeatEventType
-    let level: TailBeatLevel
-    let category: String
-    let message: String
-    let context: [String: String]?
-    let file: String
-    let function: String
-    let line: Int
-    let extras: [TailBeatExtras]
-    let source: TailBeatLogSource
-    
-    init(timestamp: Date, type: TailBeatEventType, level: TailBeatLevel, category: String, message: String, context: [String : String]?, file: String, function: String, line: Int, extras: [TailBeatExtras] = [], source: TailBeatLogSource = .TailBeat) {
-        self.timestamp = timestamp
-        self.type = type
-        self.level = level
-        self.category = category
-        self.message = message
-        self.context = context
-        self.file = file
-        self.function = function
-        self.line = line
-        self.extras = extras
-        self.source = source
-    }
-    
-    private enum CodingKeys: String, CodingKey {
-        case timestamp, type, level, category, message, context, file, function, line, extras, source
-    }
-}
 
-class TailBeatLogger {
-    // singleton instance
-    static let logger = TailBeat()
-    
-    // network stuff
-    private var connection: NWConnection?
+public class TailBeatLogger {
+    private var logStream: LogStream
     private var osLogTimer: DispatchSourceTimer?
     
     init() {
-        
+        logStream = LogStream()
     }
     
-    func start(
+    public func start(
         host: String = "127.0.0.1",
         port: UInt16 = 8085,
         collectOSLogs: Bool = false,
         collectStdout: Bool = false,
         collectStderr: Bool = false
     ) {
-        let params = NWParameters.tcp
-        connection = NWConnection(
-            host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!,
-            using: params
-        )
-        connection?.start(queue: .global())
+        logStream.connect(host: host, port: port)
+        logStream.start()
         
         if collectStdout && collectStderr {
             interceptStdoutAndStderr(collectStdout, collectStderr) { message in
@@ -186,7 +121,7 @@ class TailBeatLogger {
                        lastPosition = logStore.position(date: logEntry.date)
                        
                        // 7️⃣ Map OSLog levels to your TailBeatLevel
-                       let level: TailBeatLevel = {
+                       let level: TailBeatLogLevel = {
                            switch logEntry.level {
                            case .debug:   return .Debug
                            case .info:    return .Info
@@ -220,7 +155,7 @@ class TailBeatLogger {
        }
 
     
-    func log(level: TailBeatLevel = .Debug,
+    public func log(level: TailBeatLogLevel = .Debug,
              category: String = "",
              _ message: String,
              context: [String: String]? = nil,
@@ -235,7 +170,7 @@ class TailBeatLogger {
     
     private func log(
                      type: TailBeatEventType,
-        level: TailBeatLevel = .Debug,
+        level: TailBeatLogLevel = .Debug,
          category: String = "",
          _ message: String,
          context: [String: String]? = nil,
@@ -246,8 +181,6 @@ class TailBeatLogger {
          source: TailBeatLogSource = .TailBeat
     ) {
 #if DEBUG
-        guard let connection else { return }
-        
         var file = file
         var function = function
         var line = line
@@ -272,10 +205,7 @@ class TailBeatLogger {
             source: source
         )
         
-        if var data = try? JSONEncoder().encode(log) {
-            data.append(0x0A)
-            connection.send(content: data, completion: .contentProcessed { _ in })
-        }
+        logStream.yield(event: log)
 #endif
     }
     
