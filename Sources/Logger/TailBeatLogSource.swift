@@ -15,5 +15,5 @@ public enum TailBeatLogSource: Int, Codable, Sendable {
     case Stdout = 0
     case Stderr = 1
     case OSLog = 2
-    case TailBeat = 3
+    case Log = 3
 }

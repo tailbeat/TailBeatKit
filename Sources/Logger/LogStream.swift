@@ -11,10 +11,10 @@ import Network
 import OSLog
 import UniformTypeIdentifiers
 
-class LogStream {
+actor LogStream {
     private var connection: NWConnection?
-    private var events: AsyncStream<TailBeatEvent>
-    private var continuation: AsyncStream<TailBeatEvent>.Continuation
+    private let events: AsyncStream<TailBeatEvent>
+    private let continuation: AsyncStream<TailBeatEvent>.Continuation
     private var consumer: Task<Void, Never>?
     private var maxBufferSize: Int = 1000
     private var isStopped = false
@@ -28,14 +28,13 @@ class LogStream {
     
     func start() {
         isStopped = false
-        startConsumerEventTask()
+        consumer = Task { await consumeLoop() }
         connection?.start(queue: .global())
     }
     
     func stop() {
         isStopped = true
         consumer?.cancel()
-        consumer = nil
         disconnect()
     }
     
@@ -56,35 +55,31 @@ class LogStream {
         connection?.cancel()
     }
     
-    func sendEvent(event: TailBeatEvent) {
+    //
+    // MARK: Stream handling (input)
+    //
+    
+    nonisolated func yield(event: TailBeatEvent) {
+        continuation.yield(event)
+    }
+    
+    //
+    // MARK: Stream handling (output)
+    //
+    
+    private func consumeLoop() async {
+        for await event in events {
+            if isStopped { break }
+            await sendEvent(event: event)
+        }
+    }
+    
+    private func sendEvent(event: TailBeatEvent) {
         guard let connection else { return }
         
         if var data = try? JSONEncoder().encode(event) {
             data.append(0x0A)
             connection.send(content: data, completion: .contentProcessed { _ in })
-        }
-    }
-    
-    //
-    // MARK: Stream handling
-    //
-    
-    func yield(event: TailBeatEvent) {
-        continuation.yield(event)
-    }
-    
-    func startConsumerEventTask() {
-        // start the stream
-        consumer = Task { [weak self] in
-            guard let self else { return }
-            
-            for await event in self.events {
-                // check if the task was stopped
-                if isStopped { break }
-                
-                // send the event to TailBeat
-                sendEvent(event: event)
-            }
         }
     }
 }

@@ -12,7 +12,7 @@ import OSLog
 import UniformTypeIdentifiers
 
 public struct TailBeatEvent: Codable, Identifiable, Sendable {
-    public var id: UUID = UUID()
+    public let id: UUID = UUID()
     
     let timestamp: Date
     let type: TailBeatEventType
@@ -26,7 +26,7 @@ public struct TailBeatEvent: Codable, Identifiable, Sendable {
     let extras: [TailBeatExtras]
     let source: TailBeatLogSource
     
-    init(timestamp: Date, type: TailBeatEventType, level: TailBeatLogLevel, category: String, message: String, context: [String : String]?, file: String, function: String, line: Int, extras: [TailBeatExtras] = [], source: TailBeatLogSource = .TailBeat) {
+    init(timestamp: Date, type: TailBeatEventType, level: TailBeatLogLevel, category: String, message: String, context: [String : String]?, file: String, function: String, line: Int, extras: [TailBeatExtras] = [], source: TailBeatLogSource = .Log) {
         self.timestamp = timestamp
         self.type = type
         self.level = level

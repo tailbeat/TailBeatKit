@@ -25,5 +25,6 @@ let package = Package(
             name: "TailBeatTests",
             dependencies: ["TailBeat"]
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

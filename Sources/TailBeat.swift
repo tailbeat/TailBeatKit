@@ -6,25 +6,23 @@
 //
 
 public class TailBeat {
-    nonisolated(unsafe) public static let logger = TailBeatLogger()
-    public static let userDefaults = TailBeatUserDefaults()
+    public static let logger: TailBeatLogger = TailBeatLogger()
+    public static let userDefaults: TailBeatUserDefaults = TailBeatUserDefaults()
     
-    public static func start(configure: ((inout TailBeatConfig) -> Void)? = nil) -> TailBeat {
-        let _self = TailBeat()
-        
+    public static func start(configure: ((inout TailBeatConfig) -> Void)? = nil) {
         var config = TailBeatConfig()
         if configure != nil {
             configure!(&config)
         }
         
-        logger.start(
-            host: config.host,
-            port: config.port,
-            collectOSLogs: config.collectOSLogs,
-            collectStdout: config.collectStdout,
-            collectStderr: config.collectStderr
-        )
-        
-        return _self
+        Task {
+            await TailBeat.logger.start(
+                host: config.host,
+                port: config.port,
+                collectOSLogs: config.collectOSLogs,
+                collectStdout: config.collectStdout,
+                collectStderr: config.collectStderr
+            )
+        }
     }
 }
