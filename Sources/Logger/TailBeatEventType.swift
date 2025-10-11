@@ -11,7 +11,7 @@ import Network
 import OSLog
 import UniformTypeIdentifiers
 
-enum TailBeatEventType: Int, Codable, Sendable {
+public enum TailBeatEventType: Int, Codable, Sendable {
     case Log = 0
     case AppStarted = 1
     case AppExited = 2

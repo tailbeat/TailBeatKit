@@ -14,17 +14,17 @@ import UniformTypeIdentifiers
 public struct TailBeatEvent: Codable, Identifiable, Sendable {
     public let id: UUID = UUID()
     
-    let timestamp: Date
-    let type: TailBeatEventType
-    let level: TailBeatLogLevel
-    let category: String
-    let message: String
-    let context: [String: String]?
-    let file: String
-    let function: String
-    let line: Int
-    let extras: [TailBeatExtras]
-    let source: TailBeatLogSource
+    public let timestamp: Date
+    public let type: TailBeatEventType
+    public let level: TailBeatLogLevel
+    public let category: String
+    public let message: String
+    public let context: [String: String]?
+    public let file: String?
+    public let function: String?
+    public let line: Int?
+    public let extras: [TailBeatExtras]
+    public let source: TailBeatLogSource
     
     init(timestamp: Date, type: TailBeatEventType, level: TailBeatLogLevel, category: String, message: String, context: [String : String]?, file: String, function: String, line: Int, extras: [TailBeatExtras] = [], source: TailBeatLogSource = .Log) {
         self.timestamp = timestamp
