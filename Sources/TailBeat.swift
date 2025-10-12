@@ -14,15 +14,18 @@ public class TailBeat: ObservableObject {
     
     @Published public var languageIdentifier: String
     
-    private var net: NetworkService!
+    internal var net: NetworkService!
     private var relevantNotifications: RelevantNotifications!
+//    private var logStream: LogStream!
     
     public init() {
         languageIdentifier = Locale.current.identifier
     }
     
-    public func start2() {
+    public func start() {
         net = NetworkService()
+//        logStream = LogStream(networkService: net)
+        
         guard let net else { return }
         let appEnvironment = AppEnvironment(
             language: Locale.current.identifier,
@@ -101,19 +104,18 @@ public class TailBeat: ObservableObject {
         }
     }
     
-    public func log(_ msg: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
-        Task {
-            await net.send(event: .init(
-                timestamp: .now,
-                type: .Log,
-                level: .Debug,
-                category: "",
-                message: msg,
-                context: nil,
-                file: file.description,
-                function: function.description,
-                line: Int(line)
-            ))
-        }
-    }
+//    public func log(_ msg: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+//        let event = TailBeatEvent(
+//            timestamp: .now,
+//            type: .Log,
+//            level: .Debug,
+//            category: "",
+//            message: msg,
+//            context: nil,
+//            file: file.description,
+//            function: function.description,
+//            line: Int(line)
+//        )
+//        net.yield(event: event)
+//    }
 }

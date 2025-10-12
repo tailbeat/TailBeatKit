@@ -14,11 +14,13 @@ public final actor TailBeatLogger {
     public static let shared = TailBeatLogger()
     
     private let logStream: LogStream
+//    private let networkService: NetworkService?
     private var osLogSink: OSLogSink?
     private var stdSink: StdSink?
     
     init() {
         logStream = LogStream()
+//        networkService = networkService
     }
     
     public func start(

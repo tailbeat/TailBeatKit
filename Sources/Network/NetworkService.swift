@@ -73,6 +73,18 @@ final actor NetworkService {
     private var conn: NWConnection?
     private var buffer = Data()
     
+    // MARK: Logging stream
+    private let events: AsyncStream<TailBeatEvent>
+    private let continuation: AsyncStream<TailBeatEvent>.Continuation
+    private var consumer: Task<Void, Never>?
+    private var maxBufferSize: Int = 1000
+    
+    init() {
+        let stream = AsyncStream.makeStream(of: TailBeatEvent.self, bufferingPolicy: .bufferingNewest(maxBufferSize))
+        events = stream.stream
+        continuation = stream.continuation
+    }
+    
     func connect(
         host: String = "127.0.0.1",
         port: UInt16 = 8085,
@@ -104,6 +116,8 @@ final actor NetworkService {
             }
         }
         c.start(queue: q)
+        
+        consumer = Task { await consumeLoop() }
     }
     
     // MARK: Send API
@@ -207,6 +221,24 @@ final actor NetworkService {
         case let v as Data: return .data(v)
         case let v as Date: return .date(v)
         default: return .null
+        }
+    }
+    
+    //
+    // MARK: Logging stream handling (input)
+    //
+    
+    nonisolated func yield(event: TailBeatEvent) {
+        continuation.yield(event)
+    }
+    
+    //
+    // MARK: Logging stream handling (output)
+    //
+    
+    private func consumeLoop() async {
+        for await event in events {
+            send(event: event)
         }
     }
 }
