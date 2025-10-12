@@ -9,16 +9,55 @@ import AppKit
 import Foundation
 import Network
 
-public struct PrefPatch: Codable {
+public struct PrefPatch: Codable, Identifiable {
     public enum Value: Codable {
         case string(String), int(Int), bool(Bool), double(Double), data(Data), date(Date), null
     }
-    var key: String
-    var value: Value? // nil or .null means remove
+    public var id = UUID()
+    public var key: String
+    public var value: Value? // nil or .null means remove
     
     public init(key: String, value: Value? = nil) {
         self.key = key
         self.value = value
+    }
+}
+
+extension PrefPatch.Value {
+    public static func fromAny(_ any: Any) -> PrefPatch.Value? {
+        // Order matters because NSNumber bridges to multiple Swift types
+        if let v = any as? String { return .string(v) }
+        if let v = any as? Bool   { return .bool(v) }
+        if let v = any as? Int    { return .int(v) }
+        if let v = any as? Double { return .double(v) }
+        if let v = any as? Float  { return .double(Double(v)) }
+        if let v = any as? Data   { return .data(v) }
+
+        // Common bridged NSNumber case (just in case):
+        if let num = any as? NSNumber {
+            // Try bool first (NSNumber(bool:) is also a number)
+            let objCType = String(cString: num.objCType)
+            if objCType == "c" { return .bool(num.boolValue) }      // 'c' == CChar / Bool
+            // Integers
+            if CFNumberIsFloatType(num) == false { return .int(num.intValue) }
+            // Floats
+            return .double(num.doubleValue)
+        }
+
+        // Unsupported (e.g., arrays/dictionaries/URL/Date) — skip or encode as string if you prefer
+        return nil
+    }
+    
+    public var displayString: String {
+        switch self {
+        case .string(let s):  return s
+        case .int(let i):     return String(i)
+        case .bool(let b):    return b ? "true" : "false"
+        case .double(let d):  return String(d)
+        case .data(let d):    return "\(d.count) bytes"
+        case .date(let d):    return "\(d)"
+        case .null:           return "∅"
+        }
     }
 }
 
@@ -57,6 +96,7 @@ final actor NetworkService {
                     await self.send(appInfo: appInfo)
                     await self.send(appEnvironment: appEnvironment)
                     await self.send(appWindows: appWindows)
+                    await self.send(userDefaults: UserDefaults.standard)
                     await self.receiveLoop()
                 }
             @unknown default:
