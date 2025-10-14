@@ -5,7 +5,7 @@
 //  Created by Stephan Arenswald on 10.10.25.
 //
 
-public enum TailBeatClientMessage: Codable {
+public enum TailBeatClientMessage: Codable, Sendable {
     case ack(String)
     case error(String)
     
@@ -16,7 +16,7 @@ public enum TailBeatClientMessage: Codable {
     case defaults([PrefPatch])
 }
 
-public enum TailBeatServerMessage: Codable {
+public enum TailBeatServerMessage: Codable, Sendable {
     case ack(String)
     case error(String)
     

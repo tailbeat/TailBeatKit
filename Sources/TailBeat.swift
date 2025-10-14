@@ -1,121 +1,91 @@
 //
 //  TailBeat.swift
-//  tailbeat-swift
+//  TailBeatKit
 //
-//  Created by Stephan Arenswald on 28.09.25.
+//  Created by Stephan Arenswald on 13.10.25.
 //
 
+import AppKit
 import Foundation
-import SwiftUI
 
-@MainActor
-public class TailBeat: ObservableObject {
-    @Environment(\.colorScheme) var colorScheme: ColorScheme
+public enum TailBeat {
     
-    @Published public var languageIdentifier: String
-    
-    internal var net: NetworkService!
-    private var relevantNotifications: RelevantNotifications!
-//    private var logStream: LogStream!
-    
-    public init() {
-        languageIdentifier = Locale.current.identifier
+    // Start TailBeat
+    public static func start(
+        host: String = "127.0.0.1",
+        port: UInt16 = 8085
+    ) {
+        #if DEBUG
+        Task {
+            await TailBeatCore.shared.start(host: host, port: port)
+        }
+        #endif
     }
     
-    public func start() {
-        net = NetworkService()
-//        logStream = LogStream(networkService: net)
-        
-        guard let net else { return }
-        let appEnvironment = AppEnvironment(
-            language: Locale.current.identifier,
-            appearance: NSApp.appearance?.name.rawValue ?? "light"
-        )
-        let appInfo = AppInfo(
-            name: Bundle.main.appName,
-            bundleId: Bundle.main.bundleIdentifier,
-            version: Bundle.main.appVersionLong,
-            build: Bundle.main.appBuild,
-            localizations: Bundle.main.localizations
-        )
-        let appWindows = NSApp.windows.map { window in
-            AppWindow(windowNumber: window.windowNumber, title: window.title, frame: window.frame)
+    public static func stop() {
+        #if DEBUG
+        Task {
+            await TailBeatCore.shared.stop()
         }
-        
-        relevantNotifications = RelevantNotifications()
-        relevantNotifications.onAppWindowsResized = { windows in
-            Task.detached {
-                await net.send(appWindows: windows)
-            }
-        }
-        
-        Task.detached {
-            await net.connect(
-                appEnvironment: appEnvironment,
-                appInfo: appInfo,
-                appWindows: appWindows
-            )
-            await self.net.changeOf(windowResizeRequest: { wrr in
-                Task { @MainActor in
-                    if let window = NSApp.windows.first(where: { $0.windowNumber == wrr.windowNumber }) {
-                        window.setFrame(wrr.frame, display: true)
-                    }
-                }
-            })
-            await self.net.changeOf(windowAsKeyRequest: { windowNumber in
-                Task { @MainActor in
-                    if let window = NSApp.windows.first(where: { $0.windowNumber == windowNumber }) {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        window.makeKeyAndOrderFront(nil)
-                    }
-                }
-            })
-            await net.changeOf(appEnvironment: { env in
-                Task { @MainActor in
-                    // appearance first
-                    if let appearance = env.appearance {
-                        if appearance == "light" {
-                            NSApp.appearance = NSAppearance(named: .aqua)
-                        } else {
-                            NSApp.appearance = NSAppearance(named: .darkAqua)
-                        }
-                    }
-                    
-                    // language second
-                    if let language = env.language {
-                        self.languageIdentifier = language
-                    }
-                }
-            })
-            await net.changeOf(userDefaults: { patches in
-                let ud = UserDefaults.standard
-                patches.forEach { p in
-                    switch p.value {
-                    case .string(let v)?: ud.set(v, forKey: p.key)
-                    case .int(let v)?:    ud.set(v, forKey: p.key)
-                    case .bool(let v)?:   ud.set(v, forKey: p.key)
-                    case .double(let v)?: ud.set(v, forKey: p.key)
-                    case .data(let v)?:   ud.set(v, forKey: p.key)
-                    case .date(let v)?:   ud.set(v, forKey: p.key)
-                    case .null, nil:      ud.removeObject(forKey: p.key)
-                    }
-                }
-            })
+        #endif
+    }
+    
+    public static var logger: TailBeatLogger2 { TailBeatLogger2.shared }
+    
+    @MainActor
+    public static var ui: TailBeatUI { TailBeatUI.shared }
+}
+
+public final actor TailBeatLogger2 {
+    static let shared: TailBeatLogger2 = .init()
+    
+    public nonisolated func log(level: TailBeatLogLevel = .Debug,
+             category: String = "",
+             _ message: String,
+             context: [String: String]? = nil,
+             file: String = #filePath,
+             function: String = #function,
+             line: Int = #line,
+             extras: [TailBeatExtras] = []
+    ) {
+        let event = TailBeatEvent(
+            timestamp: .now,
+            type: .Log,
+            level: .Debug,
+            category: "",
+            message: message,
+            context: nil,
+            file: file.description,
+            function: function.description,
+            line: Int(line)
+        )
+        Task {
+            await TailBeatCore.shared.enqueueLog(event)
         }
     }
     
-//    public func log(_ msg: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
-//        let event = TailBeatEvent(
-//            timestamp: .now,
-//            type: .Log,
-//            level: .Debug,
-//            category: "",
-//            message: msg,
-//            context: nil,
-//            file: file.description,
-//            function: function.description,
-//            line: Int(line)
-//        )
-//        net.yield(event: event)
-//    }
+    public nonisolated func log(level: TailBeatLogLevel = .Debug,
+             category: String = "",
+             _ bool: Bool,
+             context: [String: String]? = nil,
+             file: String = #filePath,
+             function: String = #function,
+             line: Int = #line,
+             extras: [TailBeatExtras] = []
+    ) {
+        let event = TailBeatEvent(
+            timestamp: .now,
+            type: .Log,
+            level: .Debug,
+            category: "",
+            message: bool.description,
+            context: nil,
+            file: file.description,
+            function: function.description,
+            line: Int(line)
+        )
+        Task {
+            await TailBeatCore.shared.enqueueLog(event)
+        }
+    }
 }

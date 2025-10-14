@@ -5,7 +5,7 @@
 //  Created by Stephan Arenswald on 10.10.25.
 //
 
-public struct AppEnvironment: Codable, Equatable, Sendable {
+public struct AppEnvironment: Codable, Equatable, Hashable, Sendable {
     let schema: Int = 1
     
     public let language: String?
