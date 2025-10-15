@@ -19,6 +19,7 @@ public enum TailBeat {
         Task {
             await TailBeatCore.shared.start(host: host, port: port)
         }
+        TailBeat.logger.logAppStart()
         #endif
     }
     
@@ -39,14 +40,15 @@ public enum TailBeat {
 public final actor TailBeatLogger2 {
     static let shared: TailBeatLogger2 = .init()
     
-    public nonisolated func log(level: TailBeatLogLevel = .Debug,
-             category: String = "",
-             _ message: String,
-             context: [String: String]? = nil,
-             file: String = #filePath,
-             function: String = #function,
-             line: Int = #line,
-             extras: [TailBeatExtras] = []
+    public nonisolated func log(
+        level: TailBeatLogLevel = .Debug,
+        category: String = "",
+        _ message: String,
+        context: [String: String]? = nil,
+        file: String = #filePath,
+        function: String = #function,
+        line: Int = #line,
+        extras: [TailBeatExtras] = []
     ) {
         let event = TailBeatEvent(
             timestamp: .now,
@@ -83,6 +85,27 @@ public final actor TailBeatLogger2 {
             file: file.description,
             function: function.description,
             line: Int(line)
+        )
+        Task {
+            await TailBeatCore.shared.enqueueLog(event)
+        }
+    }
+    
+    internal nonisolated func logAppStart() {
+        let appName = Bundle.main.appName
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "Unknown Bundle Identifier"
+        let appVersion = Bundle.main.appVersionLong
+        
+        let event = TailBeatEvent(
+            timestamp: .now,
+            type: .AppStarted,
+            level: .Info,
+            category: "",
+            message: "\(appName) started (\(appVersion)) (\(bundleIdentifier))",
+            context: nil,
+            file: "",
+            function: "",
+            line: 0
         )
         Task {
             await TailBeatCore.shared.enqueueLog(event)
