@@ -135,15 +135,17 @@ final actor TailBeatCore {
     /// - Parameter message: server message (payload)
     private func handle(_ message: TailBeatServerMessage) async {
         switch message {
-        case .envChangeRequest(let env):
-            await MainActor.run { TailBeatUI.shared.apply(env) }
+        case .languageChangeRequest(let lang):
+            await MainActor.run { LanguageControl().change(to: lang) }
+        case .appearanceChangeRequest(let appearance):
+            await MainActor.run { AppearanceControl().change(to: appearance) }
         case .windowResizeRequest(let req):
             await MainActor.run { TailBeatUI.shared.resize(windowNumber: req.windowNumber, to: req.frame) }
         case .windowAsKeyRequest(let number):
             await MainActor.run { TailBeatUI.shared.makeKey(windowNumber: number) }
         case .userDefaultsPatch(let patches):
             break
-        default:
+        case .ack, .error:
             break
         }
     }

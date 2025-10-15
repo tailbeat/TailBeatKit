@@ -22,6 +22,7 @@ public enum TailBeatServerMessage: Codable, Sendable {
     
     case windowAsKeyRequest(Int)
     case windowResizeRequest(WindowResizeRequest)
-    case envChangeRequest(AppEnvironment)
+    case appearanceChangeRequest(Appearance)
     case userDefaultsPatch([PrefPatch])
+    case languageChangeRequest(String)
 }
