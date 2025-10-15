@@ -193,6 +193,7 @@ final actor TailBeatCore {
             case .data(let v): ud.set(v, forKey: patch.key)
             case .date(let v): ud.set(v, forKey: patch.key)
             case .null, nil: ud.removeObject(forKey: patch.key)
+            case .array, .dictionary: fatalError("Cannot store non-scalar values in UserDefaults")
             }
         }
     }

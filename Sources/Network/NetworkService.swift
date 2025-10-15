@@ -11,7 +11,15 @@ import Network
 
 public struct PrefPatch: Codable, Identifiable, Sendable {
     public enum Value: Codable {
-        case string(String), int(Int), bool(Bool), double(Double), data(Data), date(Date), null
+        case string(String)
+        case int(Int)
+        case bool(Bool)
+        case double(Double)
+        case data(Data)
+        case date(Date)
+        case array([Value])
+        case dictionary([String: Value])
+        case null
     }
     public var id = UUID()
     public var key: String
@@ -33,18 +41,34 @@ extension PrefPatch.Value: Sendable {
         if let v = any as? Float  { return .double(Double(v)) }
         if let v = any as? Data   { return .data(v) }
 
-        // Common bridged NSNumber case (just in case):
+        // NSNumber can be bool or number — inspect objCType
         if let num = any as? NSNumber {
-            // Try bool first (NSNumber(bool:) is also a number)
-            let objCType = String(cString: num.objCType)
-            if objCType == "c" { return .bool(num.boolValue) }      // 'c' == CChar / Bool
-            // Integers
+            let t = String(cString: num.objCType)
+            if t == "c" { return .bool(num.boolValue) }       // CChar/Bool
             if CFNumberIsFloatType(num) == false { return .int(num.intValue) }
-            // Floats
             return .double(num.doubleValue)
         }
 
-        // Unsupported (e.g., arrays/dictionaries/URL/Date) — skip or encode as string if you prefer
+        // Arrays/Dictionaries — recurse
+        if let arr = any as? [Any] {
+            let mapped = arr.compactMap { PrefPatch.Value.fromAny($0) }
+            return .array(mapped)
+        }
+        if let dict = any as? [String: Any] {
+            var mapped: [String: PrefPatch.Value] = [:]
+            for (k, v) in dict {
+                if let mv = PrefPatch.Value.fromAny(v) { mapped[k] = mv }
+            }
+            return .dictionary(mapped)
+        }
+
+        // Optional URL convenience (UserDefaults usually stores URL as Data/Bookmark;
+        // if you store as String, this covers that too)
+        if let url = any as? URL {
+            return .string(url.absoluteString)
+        }
+
+        // Unsupported type
         return nil
     }
     
@@ -57,6 +81,18 @@ extension PrefPatch.Value: Sendable {
         case .data(let d):    return "\(d.count) bytes"
         case .date(let d):    return "\(d)"
         case .null:           return "∅"
+            
+        case .array(let a):
+            // Compact preview: [item1, item2, …]
+            let parts = a.prefix(10).map { $0.displayString }
+            return "[\(parts.joined(separator: ", "))\(a.count > 10 ? ", …" : "")]"
+
+        case .dictionary(let d):
+            // Compact preview: {k1: v1, k2: v2, …}
+            let parts = d.keys.sorted().prefix(10).map { k in
+                "\(k): \(d[k]!.displayString)"
+            }
+            return "{\(parts.joined(separator: ", "))\(d.count > 10 ? ", …" : "")}"
         }
     }
 }
