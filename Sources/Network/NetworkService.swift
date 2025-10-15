@@ -9,7 +9,7 @@ import AppKit
 import Foundation
 import Network
 
-public struct PrefPatch: Codable, Identifiable, Sendable {
+public struct PrefPatch: Codable, Identifiable, Sendable, Equatable {
     public enum Value: Codable {
         case string(String)
         case int(Int)
@@ -28,6 +28,10 @@ public struct PrefPatch: Codable, Identifiable, Sendable {
     public init(key: String, value: Value? = nil) {
         self.key = key
         self.value = value
+    }
+    
+    public static func == (lhs: PrefPatch, rhs: PrefPatch) -> Bool {
+        lhs.id == rhs.id
     }
 }
 

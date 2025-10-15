@@ -25,4 +25,5 @@ public enum TailBeatServerMessage: Codable, Sendable {
     case appearanceChangeRequest(Appearance)
     case userDefaultsPatch([PrefPatch])
     case languageChangeRequest(String)
+    case requestDefaults
 }

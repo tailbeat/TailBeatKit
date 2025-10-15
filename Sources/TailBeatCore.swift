@@ -135,6 +135,8 @@ final actor TailBeatCore {
     /// - Parameter message: server message (payload)
     private func handle(_ message: TailBeatServerMessage) async {
         switch message {
+        case .requestDefaults:
+            await self.net.send(.defaults(self.snapshotUserDefaults()))
         case .languageChangeRequest(let lang):
             await MainActor.run { LanguageControl().change(to: lang) }
         case .appearanceChangeRequest(let appearance):
@@ -199,14 +201,43 @@ final actor TailBeatCore {
     }
     
     private func encodeUserDefault(_ any: Any) -> PrefPatch.Value {
-        switch any {
-        case let v as String: return .string(v)
-        case let v as Int: return .int(v)
-        case let v as Bool: return .bool(v)
-        case let v as Double: return .double(v)
-        case let v as Data: return .data(v)
-        case let v as Date: return .date(v)
-        default: return .null
+        // Fast paths
+        if let v = any as? String { return .string(v) }
+        if let v = any as? Bool   { return .bool(v) }
+        if let v = any as? Int    { return .int(v) }
+        if let v = any as? Double { return .double(v) }
+        if let v = any as? Float  { return .double(Double(v)) }
+        if let v = any as? Data   { return .data(v) }
+        if let v = any as? Date   { return .date(v) }
+        if any is NSNull          { return .null }
+
+        // NSNumber can be Bool or Number; check objCType
+        if let num = any as? NSNumber {
+            let t = String(cString: num.objCType)
+            if t == "c" { return .bool(num.boolValue) }        // 'c' == CChar / Bool
+            if CFNumberIsFloatType(num) == false { return .int(num.intValue) }
+            return .double(num.doubleValue)
         }
+
+        // Arrays (AppleLanguages will come through here as [Any])
+        if let arr = any as? [Any] {
+            return .array(arr.map(encodeUserDefault))
+        }
+
+        // Dictionaries (many defaults store nested dicts)
+        if let dict = any as? [String: Any] {
+            var out: [String: PrefPatch.Value] = [:]
+            out.reserveCapacity(dict.count)
+            for (k, v) in dict { out[k] = encodeUserDefault(v) }
+            return .dictionary(out)
+        }
+
+        // Optional convenience: URLs stored as strings
+        if let url = any as? URL {
+            return .string(url.absoluteString)
+        }
+
+        // Fallback
+        return .null
     }
 }
