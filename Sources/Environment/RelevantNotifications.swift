@@ -46,17 +46,14 @@ class RelevantNotifications {
             .compactMap { $0.object as? NSWindow }
             .receive(on: RunLoop.main)
             .sink { window in
-                print("didUpdateNotification \(window.title)")
                 self.updateWindows()
             }
             .store(in: &notifications)
     }
     
     func updateWindows(ignore: NSWindow? = nil) {
-        print("updateWindows")
         var result: [AppWindow] = []
         for window in NSApp.windows {
-            print("windowNumber: \(window.windowNumber), title: \(window.title ?? "nil")")
             if ignore == nil || window.windowNumber != ignore!.windowNumber {
                 let appWindow = AppWindow(
                     windowNumber: window.windowNumber,
