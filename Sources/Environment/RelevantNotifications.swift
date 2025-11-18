@@ -37,7 +37,6 @@ class RelevantNotifications {
             .compactMap { $0.object as? NSWindow }
             .receive(on: RunLoop.main)
             .sink { window in
-                print("willCloseNotification \(window.title)")
                 self.updateWindows(ignore: window)
             }
             .store(in: &notifications)

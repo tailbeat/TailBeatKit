@@ -30,7 +30,6 @@ class OSLogSink {
         )
         timer.setEventHandler { [weak self] in
             guard let self else { return }
-            print("\(Date.now.ISO8601Format())")
             
             lastPosition = self.logStore.position(date: lastDate)
             let entries = try! logStore.getEntries(
