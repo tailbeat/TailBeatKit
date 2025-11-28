@@ -53,7 +53,7 @@ public final actor TailBeatLogger2 {
         let event = TailBeatEvent(
             timestamp: .now,
             type: .Log,
-            level: .Debug,
+            level: level,
             category: "",
             message: message,
             context: nil,
@@ -78,7 +78,7 @@ public final actor TailBeatLogger2 {
         let event = TailBeatEvent(
             timestamp: .now,
             type: .Log,
-            level: .Debug,
+            level: level,
             category: "",
             message: bool.description,
             context: nil,
