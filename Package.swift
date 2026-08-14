@@ -6,7 +6,9 @@ import PackageDescription
 let package = Package(
     name: "TailBeatKit",
     platforms: [
-        .macOS(.v12)
+        // iOS covers iPadOS and CarPlay — a CarPlay app is an iOS app target.
+        .macOS(.v12),
+        .iOS(.v15)      // OSLogStore(scope:) lands in iOS 15
     ],
     products: [
         // The whole kit is the `tb` module: a Logger that writes to OSLog and
