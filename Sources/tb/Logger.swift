@@ -2,8 +2,11 @@
 //  Logger.swift
 //  tb
 //
-//  A thin, zero-dependency drop-in for `os.Logger` that writes to the macOS
-//  unified log (OSLog). Compared to `os.Logger` it additionally:
+//  A thin, zero-dependency drop-in for `os.Logger` that writes to the unified
+//  log (OSLog). Compared to `os.Logger` it additionally:
+//    - renders each message itself, so it — not the reading system — decides
+//      which interpolated values are written out and which become `<private>`
+//      (see OSLogMessage.swift);
 //    - captures the call site (file / function / line) plus an optional
 //      `context` bag and appends them as an eye-catcher + compact JSON tail, so
 //      a reader like TailBeat can reconstruct the full record while Console and
@@ -21,14 +24,22 @@
 import Foundation
 import os
 
-/// Drop-in replacement for `os.Logger`, with native OSLog levels.
+/// Drop-in replacement for `os.Logger`.
 ///
-/// Swap `os.Logger(subsystem:category:)` for `tb.Logger(subsystem:category:)`;
-/// the method names and levels are identical.
+/// Swap `import os` for `import tb`; the call sites stay as they are. The
+/// initializers, the method names, their levels and the message syntax —
+/// including `privacy:` — match `os.Logger`.
+///
+/// What differs is who hides a value. The kit renders the message itself:
+/// a hidden value is written out in a debug build and as `<private>` in every
+/// other build. See `OSLogPrivacy`.
 public struct Logger: Sendable {
     /// Sentinel that marks the structured tail in a message. Versioned so the
     /// format can evolve without breaking older readers.
     public static let eyeCatcher = "⟦tb1⟧"
+
+    /// A logger that records nothing.
+    public static var disabled: Logger { Logger(.disabled) }
 
     private let logger: os.Logger
 
@@ -36,59 +47,98 @@ public struct Logger: Sendable {
         self.logger = os.Logger(subsystem: subsystem, category: category)
     }
 
+    /// A logger for the default log.
+    public init() {
+        self.logger = os.Logger()
+    }
+
+    /// A logger for an existing log object.
+    public init(_ logObj: OSLog) {
+        self.logger = os.Logger(logObj)
+    }
+
+    /// Whether messages of this level are currently recorded.
+    public func isEnabled(type: OSLogType) -> Bool {
+        logger.isEnabled(type: type)
+    }
+
     // MARK: - os.Logger-compatible level methods
+    //
+    // Each method logs at the level `os.Logger` uses for the same name. The
+    // message is only built — and its interpolated expressions only evaluated —
+    // when that level is recorded.
+    //
+    // `context` is written to the log as it is, in every build. Keep user data
+    // out of it; put that in the message, where it has a privacy option.
 
-    public func trace(_ message: String, context: [String: String]? = nil,
+    /// Logs at the debug level.
+    public func trace(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
         emit(.debug, message, context, fileID, filePath, function, line)
     }
 
-    public func debug(_ message: String, context: [String: String]? = nil,
+    /// Logs at the debug level.
+    public func debug(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
         emit(.debug, message, context, fileID, filePath, function, line)
     }
 
-    public func info(_ message: String, context: [String: String]? = nil,
+    /// Logs at the info level.
+    public func info(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                      fileID: String = #fileID, filePath: String = #filePath,
                      function: String = #function, line: Int = #line) {
         emit(.info, message, context, fileID, filePath, function, line)
     }
 
-    public func notice(_ message: String, context: [String: String]? = nil,
+    /// Logs at the default (notice) level.
+    public func notice(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                        fileID: String = #fileID, filePath: String = #filePath,
                        function: String = #function, line: Int = #line) {
         emit(.default, message, context, fileID, filePath, function, line)
     }
 
-    /// A warning. Maps to OSLog `.default` (notice) so it persists in the store.
-    public func warning(_ message: String, context: [String: String]? = nil,
+    /// Logs at the error level.
+    public func warning(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                         fileID: String = #fileID, filePath: String = #filePath,
                         function: String = #function, line: Int = #line) {
-        emit(.default, message, context, fileID, filePath, function, line)
+        emit(.error, message, context, fileID, filePath, function, line)
     }
 
-    public func error(_ message: String, context: [String: String]? = nil,
+    /// Logs at the error level.
+    public func error(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
         emit(.error, message, context, fileID, filePath, function, line)
     }
 
-    /// Convenience overload for Swift errors (used throughout the existing code base).
-    public func error(_ error: any Error, context: [String: String]? = nil,
+    /// Logs an error's `localizedDescription` at the error level. The
+    /// description is a hidden value unless `privacy` says otherwise, exactly
+    /// as in `log.error("\(error.localizedDescription)")`.
+    public func error(_ error: any Error, privacy: OSLogPrivacy = .auto, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
-        emit(.error, error.localizedDescription, context, fileID, filePath, function, line)
+        emit(.error, { "\(error.localizedDescription, privacy: privacy)" }, context, fileID, filePath, function, line)
     }
 
-    public func fault(_ message: String, context: [String: String]? = nil,
+    /// Logs at the fault level.
+    public func critical(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
+                         fileID: String = #fileID, filePath: String = #filePath,
+                         function: String = #function, line: Int = #line) {
+        emit(.fault, message, context, fileID, filePath, function, line)
+    }
+
+    /// Logs at the fault level.
+    public func fault(_ message: @autoclosure () -> OSLogMessage, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
         emit(.fault, message, context, fileID, filePath, function, line)
     }
 
-    public func log(level: OSLogType = .default, _ message: String, context: [String: String]? = nil,
+    /// Logs at the given level, or at the default (notice) level.
+    public func log(level: OSLogType = .default, _ message: @autoclosure () -> OSLogMessage,
+                    context: [String: String]? = nil,
                     fileID: String = #fileID, filePath: String = #filePath,
                     function: String = #function, line: Int = #line) {
         emit(level, message, context, fileID, filePath, function, line)
@@ -96,24 +146,29 @@ public struct Logger: Sendable {
 
     // MARK: - Emission
 
-    private func emit(_ type: OSLogType, _ message: String, _ context: [String: String]?,
+    private func emit(_ type: OSLogType, _ message: () -> OSLogMessage, _ context: [String: String]?,
                       _ fileID: String, _ filePath: String, _ function: String, _ line: Int) {
+        guard logger.isEnabled(type: type) else { return }
         #if DEBUG
+        let reveal = true       // hidden values are written out
         let file = filePath     // absolute → TailBeat click-to-open on the dev machine
         #else
+        let reveal = false      // hidden values become `<private>`
         let file = fileID       // relative → no absolute path in customer logs
         #endif
+        let text = message().render(revealingHiddenValues: reveal)
         let tail = Tail(f: file, fn: function, ln: line, ctx: context,
                         kind: nil, app: nil, ver: nil).encoded()
-        // The whole payload is `.public` so a reader like TailBeat can recover it;
-        // safety comes from never logging secrets, not from OSLog redaction.
+        // The kit has already decided what the line contains, so the finished
+        // text is handed over as `.public`: a reader like TailBeat can recover
+        // it, and what it recovers does not depend on the reading system.
         // The literal `⟦tb1⟧` sits between the human message and the JSON tail.
-        logger.log(level: type, "\(message, privacy: .public) ⟦tb1⟧\(tail, privacy: .public)")
+        logger.log(level: type, "\(text, privacy: .public) ⟦tb1⟧\(tail, privacy: .public)")
     }
 
-    /// The structured tail. Optional fields are omitted when `nil`
-    /// (compiler-synthesized `encodeIfPresent`).
-    struct Tail: Encodable {
+    /// The structured tail: one JSON object. Fields are written in the order
+    /// declared here and left out when `nil`.
+    struct Tail {
         let f: String?
         let fn: String?
         let ln: Int?
@@ -122,12 +177,32 @@ public struct Logger: Sendable {
         let app: String?
         let ver: String?
 
+        /// Written by hand rather than with `JSONEncoder`: this runs for every
+        /// log call, and an encoder per call costs several times the rest of
+        /// the call. The output is what `JSONEncoder` produces with
+        /// `.withoutEscapingSlashes`, in a fixed key order.
         func encoded() -> String {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.withoutEscapingSlashes]
-            guard let data = try? encoder.encode(self),
-                  let json = String(data: data, encoding: .utf8) else { return "{}" }
-            return json
+            var json: [UInt8] = []
+            json.reserveCapacity(128)
+            json.append(UInt8(ascii: "{"))
+            if let f { json.appendJSONMember(#""f":"#); json.appendJSONString(f) }
+            if let fn { json.appendJSONMember(#""fn":"#); json.appendJSONString(fn) }
+            if let ln { json.appendJSONMember(#""ln":"#); json.append(contentsOf: String(ln).utf8) }
+            if let ctx {
+                json.appendJSONMember(#""ctx":{"#)
+                for (key, value) in ctx.sorted(by: { $0.key < $1.key }) {
+                    json.appendJSONMember("")
+                    json.appendJSONString(key)
+                    json.append(UInt8(ascii: ":"))
+                    json.appendJSONString(value)
+                }
+                json.append(UInt8(ascii: "}"))
+            }
+            if let kind { json.appendJSONMember(#""kind":"#); json.appendJSONString(kind) }
+            if let app { json.appendJSONMember(#""app":"#); json.appendJSONString(app) }
+            if let ver { json.appendJSONMember(#""ver":"#); json.appendJSONString(ver) }
+            json.append(UInt8(ascii: "}"))
+            return String(decoding: json, as: UTF8.self)
         }
     }
 
@@ -141,6 +216,48 @@ public struct Logger: Sendable {
                         kind: "appStart", app: name, ver: "\(version) (\(build))").encoded()
         let logger = os.Logger(subsystem: subsystem, category: "lifecycle")
         logger.log(level: .default, "\(name, privacy: .public) started ⟦tb1⟧\(tail, privacy: .public)")
+    }
+}
+
+/// JSON as UTF-8 bytes. Every character that needs escaping is a single byte,
+/// and no byte of a longer UTF-8 sequence can be mistaken for one.
+private extension [UInt8] {
+    /// Starts a member of the open object: a comma unless it is the first
+    /// one, then `opening`.
+    mutating func appendJSONMember(_ opening: StaticString) {
+        if last != UInt8(ascii: "{") { append(UInt8(ascii: ",")) }
+        opening.withUTF8Buffer { append(contentsOf: $0) }
+    }
+
+    /// Appends `value` as a JSON string. Escapes exactly what `JSONEncoder`
+    /// escapes with `.withoutEscapingSlashes`: `"`, `\` and U+0000…U+001F.
+    mutating func appendJSONString(_ value: String) {
+        func needsEscape(_ byte: UInt8) -> Bool {
+            byte < 0x20 || byte == UInt8(ascii: "\"") || byte == UInt8(ascii: "\\")
+        }
+        append(UInt8(ascii: "\""))
+        if !value.utf8.contains(where: needsEscape) {
+            append(contentsOf: value.utf8)      // the usual case: file paths, function names
+        } else {
+            for byte in value.utf8 {
+                switch byte {
+                case UInt8(ascii: "\""): append(contentsOf: #"\""#.utf8)
+                case UInt8(ascii: "\\"): append(contentsOf: #"\\"#.utf8)
+                case 0x08: append(contentsOf: #"\b"#.utf8)
+                case 0x09: append(contentsOf: #"\t"#.utf8)
+                case 0x0A: append(contentsOf: #"\n"#.utf8)
+                case 0x0C: append(contentsOf: #"\f"#.utf8)
+                case 0x0D: append(contentsOf: #"\r"#.utf8)
+                case 0x00..<0x20:
+                    let hex = Array("0123456789abcdef".utf8)
+                    append(contentsOf: #"\u00"#.utf8)
+                    append(hex[Int(byte >> 4)])
+                    append(hex[Int(byte & 0x0F)])
+                default: append(byte)
+                }
+            }
+        }
+        append(UInt8(ascii: "\""))
     }
 }
 
