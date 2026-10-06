@@ -175,7 +175,7 @@ struct Sample: Sendable, CustomTestStringConvertible {
 
 /// What `os.Logger` and the kit wrote for this test run, read back from the
 /// log store once.
-private enum Recorded {
+enum Recorded {
     struct Line: Sendable {
         let category: String
         let level: OSLogEntryLog.Level
@@ -211,6 +211,10 @@ private enum Recorded {
         let since = Date().addingTimeInterval(-1)
 
         for sample in Sample.all { sample.reference(reference) }
+        for (index, option) in Option.all.enumerated() {
+            option.reference(reference)
+            if index % 50 == 49 { Thread.sleep(forTimeInterval: 0.05) }     // leave the log some air
+        }
 
         kit.error("kit.hidden \(secret)")
         kit.error("kit.public \(secret, privacy: .public)")
@@ -253,6 +257,14 @@ private enum Recorded {
     /// The line in `category` whose message starts with the word `key`.
     static func line(_ category: String, _ key: String) throws -> Line? {
         try lines.get().first { $0.category == category && ($0.text == key || $0.text.hasPrefix(key + " ")) }
+    }
+
+    /// What `os.Logger` wrote for the value of the option called `name`: the
+    /// text between the bars of `option.<name>|<value>|`.
+    static func option(_ name: String) throws -> String? {
+        let start = "option.\(name)|"
+        return try lines.get().first { $0.category == "os" && $0.message.hasPrefix(start) }
+            .map { String($0.message.dropFirst(start.count).dropLast()) }
     }
 }
 

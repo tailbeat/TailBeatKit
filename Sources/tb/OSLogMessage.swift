@@ -3,9 +3,9 @@
 //  tb
 //
 //  The message type behind `Logger`. It gives log calls os_log's call form —
-//  `"\(value)"` and `"\(value, privacy: .public)"` — through Swift's custom
-//  string interpolation, and keeps every interpolated value apart from the
-//  literal text until the message is rendered.
+//  `"\(value)"`, `"\(value, privacy: .public)"` and the other options of an
+//  interpolated value — through Swift's custom string interpolation, and keeps
+//  every value apart from the literal text until the message is rendered.
 //
 //  Rendering is where a value is either written out or replaced by
 //  `<private>`. The kit does this itself, so what a log line contains is
@@ -81,12 +81,21 @@ public struct OSLogInterpolation: StringInterpolationProtocol {
         var privacy: OSLogPrivacy
         /// What `.auto` means for a value of this type.
         var shownByDefault: Bool
-        /// The value as text. Not called for a value that is written as
-        /// `<private>`.
+        /// Text in front of the value that os_log makes part of the message
+        /// rather than of the value — the `+` and `0x` of an unsigned number.
+        /// It is written for a hidden value too, and stays outside the column
+        /// of an aligned one.
+        var prefix = ""
+        var align = OSLogStringAlignment.none
+        /// The value as text, without `prefix` and not yet aligned. Not called
+        /// for a value that is written as `<private>`.
         var render: () -> String
 
         func text(revealingHiddenValues reveal: Bool) -> String {
-            reveal || privacy.shows(byDefault: shownByDefault) ? render() : OSLogMessage.hiddenValue
+            let text = reveal || privacy.shows(byDefault: shownByDefault)
+                ? align.apply(to: render())
+                : OSLogMessage.hiddenValue      // as it is: os_log does not align what it hides
+            return prefix.isEmpty ? text : prefix + text
         }
     }
 
@@ -109,26 +118,31 @@ public struct OSLogInterpolation: StringInterpolationProtocol {
     }
 
     /// Every `appendInterpolation` ends here.
-    mutating func appendValue(_ privacy: OSLogPrivacy, shownByDefault: Bool, _ render: @escaping () -> String) {
-        segments.append(.value(Value(privacy: privacy, shownByDefault: shownByDefault, render: render)))
+    mutating func appendValue(_ privacy: OSLogPrivacy, shownByDefault: Bool, prefix: String = "",
+                              align: OSLogStringAlignment = .none, _ render: @escaping () -> String) {
+        segments.append(.value(Value(privacy: privacy, shownByDefault: shownByDefault, prefix: prefix,
+                                     align: align, render: render)))
     }
 }
 
 // MARK: Text — hidden by default
 
 extension OSLogInterpolation {
-    public mutating func appendInterpolation(_ string: String, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: false) { string }
+    public mutating func appendInterpolation(_ string: String, align: OSLogStringAlignment = .none,
+                                             privacy: OSLogPrivacy = .auto) {
+        appendValue(privacy, shownByDefault: false, align: align) { string }
     }
 
     /// Any describable value, written as its `description`.
-    public mutating func appendInterpolation<T: CustomStringConvertible>(_ value: T, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: false) { value.description }
+    public mutating func appendInterpolation<T: CustomStringConvertible>(_ value: T, align: OSLogStringAlignment = .none,
+                                                                         privacy: OSLogPrivacy = .auto) {
+        appendValue(privacy, shownByDefault: false, align: align) { value.description }
     }
 
     /// A type, written as its unqualified name.
-    public mutating func appendInterpolation(_ type: any Any.Type, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: false) { String(describing: type) }
+    public mutating func appendInterpolation(_ type: any Any.Type, align: OSLogStringAlignment = .none,
+                                             privacy: OSLogPrivacy = .auto) {
+        appendValue(privacy, shownByDefault: false, align: align) { String(describing: type) }
     }
 }
 
@@ -167,58 +181,85 @@ extension OSLogInterpolation {
 // MARK: Numbers and booleans — shown by default
 
 extension OSLogInterpolation {
-    public mutating func appendInterpolation(_ number: Int, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: Int, format: OSLogIntegerFormatting<Int> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: Int8, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: Int8, format: OSLogIntegerFormatting<Int8> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: Int16, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: Int16, format: OSLogIntegerFormatting<Int16> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: Int32, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: Int32, format: OSLogIntegerFormatting<Int32> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: Int64, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: Int64, format: OSLogIntegerFormatting<Int64> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: UInt, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: UInt, format: OSLogIntegerFormatting<UInt> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: UInt8, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: UInt8, format: OSLogIntegerFormatting<UInt8> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: UInt16, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: UInt16, format: OSLogIntegerFormatting<UInt16> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: UInt32, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: UInt32, format: OSLogIntegerFormatting<UInt32> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    public mutating func appendInterpolation(_ number: UInt64, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(number) }
+    public mutating func appendInterpolation(_ number: UInt64, format: OSLogIntegerFormatting<UInt64> = .decimal,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInteger(number, format, align, privacy)
     }
 
-    /// Written with six decimal places, as os_log's default `%f`.
-    public mutating func appendInterpolation(_ number: Double, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(format: "%f", number) }
+    /// os_log refuses `.hex` and `.octal` for a signed number, with this
+    /// message, when the call is compiled. This overload is what such a call
+    /// resolves to, so the kit refuses it in the same way.
+    @available(*, unavailable, message: "Signed integers must be formatted using .decimal")
+    public mutating func appendInterpolation<T: FixedWidthInteger & SignedInteger>(
+        _ number: T, format: OSLogIntegerFormatting<UInt>, align: OSLogStringAlignment = .none,
+        privacy: OSLogPrivacy = .auto) {}
+
+    mutating func appendInteger<T: FixedWidthInteger>(_ number: T, _ format: OSLogIntegerFormatting<T>,
+                                                      _ align: OSLogStringAlignment, _ privacy: OSLogPrivacy) {
+        appendValue(privacy, shownByDefault: true, prefix: format.prefix, align: align) { format.text(number) }
     }
 
-    public mutating func appendInterpolation(_ number: Float, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { String(format: "%f", Double(number)) }
+    /// Written with six decimal places unless `format` says otherwise, as
+    /// os_log's default `%f`.
+    public mutating func appendInterpolation(_ number: Double, format: OSLogFloatFormatting = .fixed,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendValue(privacy, shownByDefault: true, align: align) { format.text(number) }
     }
 
-    /// Written as `true` or `false`.
-    public mutating func appendInterpolation(_ boolean: Bool, privacy: OSLogPrivacy = .auto) {
-        appendValue(privacy, shownByDefault: true) { boolean ? "true" : "false" }
+    public mutating func appendInterpolation(_ number: Float, format: OSLogFloatFormatting = .fixed,
+                                             align: OSLogStringAlignment = .none, privacy: OSLogPrivacy = .auto) {
+        appendInterpolation(Double(number), format: format, align: align, privacy: privacy)
+    }
+
+    /// Written as `true` or `false` unless `format` says otherwise.
+    public mutating func appendInterpolation(_ boolean: Bool, format: OSLogBoolFormat = .truth,
+                                             privacy: OSLogPrivacy = .auto) {
+        appendValue(privacy, shownByDefault: true) { format.text(boolean) }
     }
 }
 

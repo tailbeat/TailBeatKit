@@ -37,6 +37,11 @@ import Testing
             and \(flag ? "a" : "no", privacy: .public) expression
             """)
 
+        // Layout and number options.
+        log.info("\(planet, align: .left(columns: 12)) \(count, format: .decimal(minDigits: 3), align: .right(columns: 6))")
+        log.info("\(UInt8(count), format: .hex(includePrefix: true)) \(0.5, format: .fixed(precision: 2)) \(flag, format: .answer)")
+        log.info("\(UInt16(count), format: .octal, align: .none, privacy: .public) \(Float(0.5), format: .exponential, privacy: .private)")
+
         // The kit's additions sit behind the message.
         log.warning("with context", context: ["request": "42"])
         log.error(error)
@@ -50,8 +55,13 @@ import Testing
         interpolation.appendLiteral("n=")
         interpolation.appendInterpolation(7, privacy: .public)
 
+        let aligned: OSLogMessage = "\(7, format: OSLogIntegerFormatting.decimal(minDigits: 3), align: OSLogStringAlignment.right(columns: 5))"
+        let formatted: OSLogMessage = "\(UInt(255), format: OSLogIntegerFormatting.hex) \(0.5, format: OSLogFloatFormatting.hybrid) \(true, format: OSLogBoolFormat.answer)"
+
         #expect(message.render(revealingHiddenValues: false) == "explicit <private>")
         #expect(OSLogMessage(stringInterpolation: interpolation).render(revealingHiddenValues: false) == "n=7")
+        #expect(aligned.render(revealingHiddenValues: false) == "  007")
+        #expect(formatted.render(revealingHiddenValues: false) == "ff 0.5 YES")
     }
 
     @Test func initializersMatchOSLogger() {
