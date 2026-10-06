@@ -310,3 +310,7 @@ Earlier versions of `Logger` took a `String`. Three things change:
 - `warning` logs at the error level, as `os.Logger.warning` does.
 - `log.error(error)` treats the description as a hidden value, and writes the
   domain and the code of the error where it is hidden.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
