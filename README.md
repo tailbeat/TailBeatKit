@@ -94,6 +94,29 @@ This is what os_log does on a system that records private data, and on one
 that does not: where private data is recorded, a private value is readable and
 a sensitive one still is not.
 
+### Hidden errors
+
+An error is hidden like text, but not written as `<private>`. What says which
+error it is stays readable, as in os_log:
+
+```swift
+log.error("save failed: \(error)")
+// release: save failed: Error Domain=NSCocoaErrorDomain Code=4
+// debug:   save failed: Error Domain=NSCocoaErrorDomain Code=4 "The file doesn’t exist."
+```
+
+The hidden form has the domain and the code of the error. Of its user info it
+has the keys, with `<private>` for each value — except a number, which is
+written, and another error, which is written in the same form:
+
+```
+Error Domain=NSCocoaErrorDomain Code=260 UserInfo={NSFilePath=<private>, NSUnderlyingError=0x600000c0a1f0 {Error Domain=NSPOSIXErrorDomain Code=2 "No such file or directory"}}
+```
+
+A Swift error has its type as the domain and the number of its case as the
+code: `Error Domain=App.SyncError Code=1`. What the error says about itself —
+its description, its associated values — is left out.
+
 ### Masks
 
 `.auto(mask:)`, `.private(mask:)` and `.sensitive(mask:)` say what is written
@@ -160,9 +183,6 @@ itself puts into the log.
   not reveal a value the kit has hidden: in a release build the value is not
   in the log at all. And a debug build writes private values out on every
   system, whatever it is set to.
-- **A hidden error.** os_log keeps the domain and the code of a hidden error
-  readable (`Error Domain=NSCocoaErrorDomain Code=4`). The kit hides an error
-  whole.
 - **Fingerprints** are the kit's own. They have the shape of os_log's but not
   its values, and they are taken from the text of the value, so a number that
   is written in two formats has two fingerprints.
@@ -179,9 +199,10 @@ itself puts into the log.
   IOKit's common codes (`0xe00002bc` and up), and it names the bootstrap codes
   1100 to 1105.
 - **Long lines.** os_log has about 1 KB for all the values of one message and
-  cuts each value that does not fit. A line of the kit travels as two values,
-  its text and its call site: if together they are longer than about 1000
-  bytes, os_log cuts the text and the call site is lost.
+  cuts each value that does not fit. A line of the kit is cut as a whole, so
+  that its call site stays; see [Long lines](#long-lines). At the fault level
+  os_log can store up to 1978 bytes when the call stack is short; the kit
+  keeps to the 786 that fit under every call stack.
 - **`OSLogIntegerFormatting` is generic** over the type of number it formats;
   that is how `.hex` on a signed number is refused. At a call site nothing
   changes. A variable of the type needs the argument spelled out:
@@ -211,10 +232,32 @@ log.error("upload failed", context: ["request": requestID])
 Context is written as it is in every build. Keep user data out of it and put
 that in the message, where it has a privacy option.
 
+### Long lines
+
+os_log stores a limited number of bytes of one message and cuts off what is
+beyond, from the end — where the call site is. So the kit cuts first, and cuts
+the text: text and call site together take at most 1008 bytes of UTF-8. The
+cut falls behind a whole character and is marked with `<…>`, the mark os_log
+uses itself:
+
+```
+loaded xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx<…> ⟦tb1⟧{"f":"App/Loader.swift","fn":"load()","ln":40}
+```
+
+At the fault level the limit is 786 bytes, because os_log stores the call
+stack of a fault in the same space.
+
+The call site is never cut. A context that would make it longer than half the
+line is left out instead, with a note in its place:
+`"ctx":{"<…>":"3003 bytes of context left out"}`. Only a call site that is
+longer than a whole line on its own, such as a file path of a thousand bytes,
+is more than the kit can fit; os_log then cuts it.
+
 ## Also in the kit
 
 - `log.error(error)` logs an error's `localizedDescription`. The description is
-  a hidden value; pass `privacy: .public` to show it.
+  a hidden value; pass `privacy: .public` to show it. Where it is hidden, the
+  domain and the code of the error are written in its place.
 - `tb.start(subsystem:)` logs one record with the app's name and version. Call
   it once at launch.
 - `tb.mask(_:)` turns a string into a short, stable, non-reversible token for
@@ -265,4 +308,5 @@ Earlier versions of `Logger` took a `String`. Three things change:
   `log.info("\(text)")`. Values are now hidden or shown as described above;
   add `privacy: .public` where a release build should show a value.
 - `warning` logs at the error level, as `os.Logger.warning` does.
-- `log.error(error)` treats the description as a hidden value.
+- `log.error(error)` treats the description as a hidden value, and writes the
+  domain and the code of the error where it is hidden.

@@ -101,6 +101,14 @@ func kitAdditions(error: any Error) {
     log.error(error, privacy: .public)
 }
 
+/// A line that is longer than os_log stores: the text is cut, the call site stays.
+func longLines() {
+    let listing = String(repeating: "entry ", count: 400)
+    log.notice("long text \(listing, privacy: .public)")
+    log.fault("long text at the fault level \(listing, privacy: .public)")
+    log.notice("long context", context: ["listing": listing])
+}
+
 greet("Jupiter")
 report(count: 3, flag: true, error: DemoError.offCourse)
 privacyOptions(user: "jane@example.com", attempts: 3)
@@ -111,5 +119,6 @@ rawMemory()
 attributes(size: 1_536_000, user: "jane@example.com")
 levels(runtime: CommandLine.arguments.count > 2 ? .debug : .info)
 kitAdditions(error: DemoError.offCourse)
+longLines()
 everyOption(log)
 everyPrivacyOption(log)
