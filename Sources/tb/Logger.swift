@@ -115,12 +115,13 @@ public struct Logger: Sendable {
     }
 
     /// Logs an error's `localizedDescription` at the error level. The
-    /// description is a hidden value unless `privacy` says otherwise, exactly
-    /// as in `log.error("\(error.localizedDescription)")`.
+    /// description is a hidden value unless `privacy` says otherwise. Where it
+    /// is hidden, the domain and the code of the error are written in its
+    /// place, as in `log.error("\(error)")`.
     public func error(_ error: any Error, privacy: OSLogPrivacy = .auto, context: [String: String]? = nil,
                       fileID: String = #fileID, filePath: String = #filePath,
                       function: String = #function, line: Int = #line) {
-        emit(.error, { "\(error.localizedDescription, privacy: privacy)" }, context, fileID, filePath, function, line)
+        emit(.error, { "\(localizedDescriptionOf: error, privacy: privacy)" }, context, fileID, filePath, function, line)
     }
 
     /// Logs at the fault level.

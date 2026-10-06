@@ -333,7 +333,7 @@ extension Option {
         Option("attributes.object.nil", "(null)",
                { "\(nil as NSObject?, privacy: $0, attributes: "foo")" },
                { $0.notice("option.attributes.object.nil|\(nil as NSObject?, privacy: .public, attributes: "foo")|") }),
-        Option("attributes.error", #"Error Domain=app.tb.tests Code=7 "(null)""#,
+        Option("attributes.error", #"Error Domain=app.tb.tests Code=7 "(null)""#, hidden: "Error Domain=app.tb.tests Code=7",
                { "\(NSError(domain: "app.tb.tests", code: 7), privacy: $0, attributes: "foo")" },
                { $0.notice("option.attributes.error|\(NSError(domain: "app.tb.tests", code: 7), privacy: .public, attributes: "foo")|") }),
         Option("attributes.double", "    0.50",

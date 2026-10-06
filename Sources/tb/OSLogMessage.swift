@@ -34,7 +34,8 @@ public typealias OSLog = os.OSLog
 ///
 /// A value is either *shown* or *hidden*. A shown value is always written as
 /// text. A hidden value is not written: `<private>` takes its place, or a
-/// fingerprint of the value if the option carries the `.hash` mask.
+/// fingerprint of the value if the option carries the `.hash` mask. Of a
+/// hidden error, the domain and the code are written, as os_log writes them.
 ///
 /// A debug build writes out what `.private` hides, and what `.auto` hides for
 /// the type of the value. What `.sensitive` hides stays hidden in every build.
@@ -126,8 +127,11 @@ public struct OSLogInterpolation: StringInterpolationProtocol {
         /// of an aligned one.
         var prefix = ""
         var align = OSLogStringAlignment.none
+        /// What is written for the value when it is hidden and has no mask,
+        /// if that is not `<private>`: os_log's hidden form of an error.
+        var hidden: (() -> String)?
         /// The value as text, without `prefix` and not yet aligned. Not called
-        /// for a value that is written as `<private>`.
+        /// for a value that is written in its hidden form.
         var render: () -> String
 
         func text(revealingHiddenValues reveal: Bool) -> String {
@@ -137,7 +141,7 @@ public struct OSLogInterpolation: StringInterpolationProtocol {
             } else if privacy.mask == .hash {
                 text = OSLogPrivacy.fingerprint(of: render())
             } else {
-                text = OSLogMessage.hiddenValue
+                text = hidden?() ?? OSLogMessage.hiddenValue
             }
             // What stands for a hidden value is not aligned, as in os_log.
             return prefix.isEmpty ? text : prefix + text
@@ -164,9 +168,10 @@ public struct OSLogInterpolation: StringInterpolationProtocol {
 
     /// Every `appendInterpolation` ends here.
     mutating func appendValue(_ privacy: OSLogPrivacy, shownByDefault: Bool, prefix: String = "",
-                              align: OSLogStringAlignment = .none, _ render: @escaping () -> String) {
+                              align: OSLogStringAlignment = .none, hidden: (() -> String)? = nil,
+                              _ render: @escaping () -> String) {
         segments.append(.value(Value(privacy: privacy, shownByDefault: shownByDefault, prefix: prefix,
-                                     align: align, render: render)))
+                                     align: align, hidden: hidden, render: render)))
     }
 }
 
@@ -196,16 +201,25 @@ extension OSLogInterpolation {
 }
 
 // MARK: Objects and errors — hidden by default
+//
+// A hidden error is not written as `<private>`. os_log leaves its domain and
+// its code readable — `Error Domain=NSCocoaErrorDomain Code=4` — and so does
+// the kit; see `hiddenForm(of:)`. That goes for an error that arrives as an
+// object, too.
 
 extension OSLogInterpolation {
     public mutating func appendInterpolation(_ object: NSObject, privacy: OSLogPrivacy = .auto,
                                              attributes: String = "") {
-        appendValue(privacy, shownByDefault: false) { object.description }
+        let error = object as? NSError
+        appendValue(privacy, shownByDefault: false, hidden: error.map { error in { Self.hiddenForm(of: error) } }) {
+            object.description
+        }
     }
 
     public mutating func appendInterpolation(_ object: NSObject?, privacy: OSLogPrivacy = .auto,
                                              attributes: String = "") {
-        appendValue(privacy, shownByDefault: false) { object?.description ?? "(null)" }
+        guard let object else { return appendValue(privacy, shownByDefault: false) { "(null)" } }
+        appendInterpolation(object, privacy: privacy)
     }
 
     // The error overloads are generic so that a value which is both an object
@@ -215,12 +229,15 @@ extension OSLogInterpolation {
     /// An error, written as os_log writes it: the description of its `NSError` form.
     public mutating func appendInterpolation<E: Error>(_ error: E, privacy: OSLogPrivacy = .auto,
                                                        attributes: String = "") {
-        appendValue(privacy, shownByDefault: false) { (error as NSError).description }
+        appendValue(privacy, shownByDefault: false, hidden: { Self.hiddenForm(of: error as NSError) }) {
+            (error as NSError).description
+        }
     }
 
     public mutating func appendInterpolation<E: Error>(_ error: E?, privacy: OSLogPrivacy = .auto,
                                                        attributes: String = "") {
-        appendValue(privacy, shownByDefault: false) { (error as NSError?)?.description ?? "(null)" }
+        guard let error else { return appendValue(privacy, shownByDefault: false) { "(null)" } }
+        appendInterpolation(error, privacy: privacy)
     }
 
     /// An error that is also describable is written as an error. Without this
@@ -228,7 +245,54 @@ extension OSLogInterpolation {
     /// one equally well.
     public mutating func appendInterpolation<E: Error & CustomStringConvertible>(
         _ error: E, privacy: OSLogPrivacy = .auto, attributes: String = "") {
-        appendValue(privacy, shownByDefault: false) { (error as NSError).description }
+        appendValue(privacy, shownByDefault: false, hidden: { Self.hiddenForm(of: error as NSError) }) {
+            (error as NSError).description
+        }
+    }
+
+    /// The `localizedDescription` of an error, and the hidden form of the
+    /// error where it is hidden. This is what `Logger.error(_:)` logs.
+    mutating func appendInterpolation(localizedDescriptionOf error: any Error, privacy: OSLogPrivacy) {
+        appendValue(privacy, shownByDefault: false, hidden: { Self.hiddenForm(of: error as NSError) }) {
+            error.localizedDescription
+        }
+    }
+
+    /// What os_log writes for a hidden error: what says which error it is,
+    /// without what it is about.
+    ///
+    /// This is the description of an `NSError` with the text taken out. The
+    /// domain and the code stay. Of the user info, the keys stay and the
+    /// values become `<private>` — except a number, which is written, as
+    /// numbers are in os_log, and another error, which is written in this
+    /// same form. The description itself is left out; os_log was only seen to
+    /// keep it for "No such file or directory".
+    ///
+    /// The form follows what `os.Logger` writes on a system where the value
+    /// is hidden, including the address in front of an underlying error and
+    /// the point where a chain of underlying errors is no longer followed.
+    static func hiddenForm(of error: NSError, depth: Int = 0) -> String {
+        var text = "Error Domain=\(error.domain) Code=\(error.code)"
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+            text += " \"\(String(cString: strerror(ENOENT)))\""
+        }
+        // Through Core Foundation, for the dictionary the error itself holds:
+        // its keys are written in the order that dictionary has them in.
+        guard let info = CFErrorCopyUserInfo(error as CFError) as NSDictionary?, info.count > 0 else { return text }
+        func address(_ object: AnyObject) -> String {
+            "0x" + String(UInt(bitPattern: Unmanaged.passUnretained(object).toOpaque()), radix: 16)
+        }
+        guard depth < 3 else { return text + " UserInfo=\(address(info)) (not displayed)" }
+        let entries = info.allKeys.map { key -> String in
+            switch info[key] {
+            case let underlying as NSError where key as? String == NSUnderlyingErrorKey:
+                "\(key)=\(address(underlying)) {\(hiddenForm(of: underlying, depth: depth + 1))}"
+            case let other as NSError: "\(key)=\(hiddenForm(of: other))"
+            case let number as NSNumber: "\(key)=\(number)"
+            default: "\(key)=\(OSLogMessage.hiddenValue)"
+            }
+        }
+        return text + " UserInfo={" + entries.joined(separator: ", ") + "}"
     }
 }
 

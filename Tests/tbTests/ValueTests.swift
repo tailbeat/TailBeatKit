@@ -34,6 +34,9 @@ struct Sample: Sendable, CustomTestStringConvertible {
     let text: String
     /// Whether the value is shown when no privacy option is given.
     let shownByDefault: Bool
+    /// What is written for the value when it is hidden: `<private>`, or for
+    /// an error what os_log leaves readable of it.
+    var hidden = "<private>"
     /// A kit message made of the value alone — with the given option, or with none.
     let message: @Sendable (tb.OSLogPrivacy?) -> tb.OSLogMessage
     /// Logs the value through `os.Logger`, as `auto.<name> <value>` with no
@@ -70,25 +73,25 @@ struct Sample: Sendable, CustomTestStringConvertible {
         Sample(name: "NSObject.nil", text: "(null)", shownByDefault: false,
                message: { p in let v: NSObject? = nil; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v: NSObject? = nil; log.notice("auto.NSObject.nil \(v)"); log.notice("public.NSObject.nil \(v, privacy: .public)") }),
-        Sample(name: "Error", text: "tbTests.PlainError.boom", shownByDefault: false,
+        Sample(name: "Error", text: "tbTests.PlainError.boom", shownByDefault: false, hidden: "Error Domain=tbTests.PlainError Code=0",
                message: { p in let v: any Error = PlainError.boom; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v: any Error = PlainError.boom; log.notice("auto.Error \(v)"); log.notice("public.Error \(v, privacy: .public)") }),
-        Sample(name: "Error.concrete", text: "tbTests.PlainError.boom", shownByDefault: false,
+        Sample(name: "Error.concrete", text: "tbTests.PlainError.boom", shownByDefault: false, hidden: "Error Domain=tbTests.PlainError Code=0",
                message: { p in let v = PlainError.boom; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v = PlainError.boom; log.notice("auto.Error.concrete \(v)"); log.notice("public.Error.concrete \(v, privacy: .public)") }),
-        Sample(name: "Error.describable", text: "described boom", shownByDefault: false,
+        Sample(name: "Error.describable", text: "described boom", shownByDefault: false, hidden: "Error Domain=tbTests.DescribedError Code=0",
                message: { p in let v = DescribedError.boom; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v = DescribedError.boom; log.notice("auto.Error.describable \(v)"); log.notice("public.Error.describable \(v, privacy: .public)") }),
-        Sample(name: "Error.optional", text: "tbTests.PlainError.boom", shownByDefault: false,
+        Sample(name: "Error.optional", text: "tbTests.PlainError.boom", shownByDefault: false, hidden: "Error Domain=tbTests.PlainError Code=0",
                message: { p in let v: (any Error)? = PlainError.boom; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v: (any Error)? = PlainError.boom; log.notice("auto.Error.optional \(v)"); log.notice("public.Error.optional \(v, privacy: .public)") }),
         Sample(name: "Error.nil", text: "(null)", shownByDefault: false,
                message: { p in let v: (any Error)? = nil; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v: (any Error)? = nil; log.notice("auto.Error.nil \(v)"); log.notice("public.Error.nil \(v, privacy: .public)") }),
-        Sample(name: "NSError", text: #"Error Domain=app.tb.tests Code=7 "(null)""#, shownByDefault: false,
+        Sample(name: "NSError", text: #"Error Domain=app.tb.tests Code=7 "(null)""#, shownByDefault: false, hidden: "Error Domain=app.tb.tests Code=7",
                message: { p in let v = NSError(domain: "app.tb.tests", code: 7); return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v = NSError(domain: "app.tb.tests", code: 7); log.notice("auto.NSError \(v)"); log.notice("public.NSError \(v, privacy: .public)") }),
-        Sample(name: "NSError.optional", text: #"Error Domain=app.tb.tests Code=7 "(null)""#, shownByDefault: false,
+        Sample(name: "NSError.optional", text: #"Error Domain=app.tb.tests Code=7 "(null)""#, shownByDefault: false, hidden: "Error Domain=app.tb.tests Code=7",
                message: { p in let v: NSError? = NSError(domain: "app.tb.tests", code: 7); return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v: NSError? = NSError(domain: "app.tb.tests", code: 7); log.notice("auto.NSError.optional \(v)"); log.notice("public.NSError.optional \(v, privacy: .public)") }),
 
@@ -186,8 +189,8 @@ struct Sample: Sendable, CustomTestStringConvertible {
         ]
         for option in options {
             let message = sample.message(option.privacy)
-            #expect(message.render(revealingHiddenValues: true) == (option.revealing ? sample.text : "<private>"))
-            #expect(message.render(revealingHiddenValues: false) == (option.hiding ? sample.text : "<private>"))
+            #expect(message.render(revealingHiddenValues: true) == (option.revealing ? sample.text : sample.hidden))
+            #expect(message.render(revealingHiddenValues: false) == (option.hiding ? sample.text : sample.hidden))
         }
     }
 }
@@ -251,9 +254,17 @@ enum Recorded {
         reference.notice("privacy.sensitive.hash.aligned|\(secret, align: .right(columns: 40), privacy: .sensitive(mask: .hash))|")
         reference.notice("privacy.sensitive.hash.three|\(secret, privacy: .sensitive(mask: .hash))|\(secret, privacy: .sensitive(mask: .hash))|\("Saturn", privacy: .sensitive(mask: .hash))|")
 
+        // Hidden errors: as an error and as an object.
+        for sample in ErrorSample.all + [ErrorSample.unordered] {
+            reference.notice("hidden.error.\(sample.name, privacy: .public)|\(sample.error, privacy: .sensitive)|")
+            reference.notice("hidden.object.\(sample.name, privacy: .public)|\(sample.error as NSError, privacy: .sensitive)|")
+        }
+
         kit.error("kit.hidden \(secret)")
         kit.error("kit.public \(secret, privacy: .public)")
         kit.error("kit.sensitive \(secret, privacy: .sensitive)")
+        kit.error("kit.error.sensitive \(CocoaError(.fileNoSuchFile), privacy: .sensitive)")
+        tb.Logger(subsystem: subsystem, category: "tb.error.sensitive").error(CocoaError(.fileNoSuchFile), privacy: .sensitive)
         kit.error("kit.options \(secret, align: .right(columns: 9), privacy: .public) \(UInt(255), format: .hex(includePrefix: true)) \(1_536_000, format: .byteCount)")
         kit.error("kit.literal 100% %s %@ %{public}s %d")
         logCallSite(kit)
@@ -367,7 +378,7 @@ enum Recorded {
         #expect(error.text == description)
         #else
         #expect(hidden.text == "kit.hidden <private>")
-        #expect(error.text == "<private>")
+        #expect(error.text == "Error Domain=NSCocoaErrorDomain Code=4")
         #endif
         #expect(shown.text == "kit.public Jupiter")
         #expect(publicError.text == description)
@@ -381,6 +392,18 @@ enum Recorded {
         let options = try #require(try Recorded.line("tb", "kit.options"))
         #expect(sensitive.text == "kit.sensitive <private>")
         #expect(options.text == "kit.options   Jupiter 0xff 1.54 MB")
+    }
+
+    /// In every build: a hidden error reaches the log as `os.Logger` writes
+    /// it, from a message and from `error(_:)`.
+    @Test func aHiddenErrorIsLoggedAsOSLoggerLogsIt() throws {
+        let reference = try #require(try Recorded.reference("hidden.error.cocoa"))
+        let inMessage = try #require(try Recorded.line("tb", "kit.error.sensitive"))
+        let fromMethod = try #require(try Recorded.lines.get().first { $0.category == "tb.error.sensitive" })
+        #expect(reference == "Error Domain=NSCocoaErrorDomain Code=4")
+        #expect(inMessage.text == "kit.error.sensitive " + reference)
+        #expect(fromMethod.text == reference)
+        #expect(fromMethod.level == .error)
     }
 
     /// The finished text travels as an argument, never as os_log's format.
