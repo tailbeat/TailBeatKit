@@ -6,6 +6,9 @@
 //      swift run KitDemo [subsystem]               debug build: hidden values are written out
 //      swift run -c release KitDemo [subsystem]    release build: hidden values become <private>
 //
+//  The last lines come from `EveryOption.swift`, which holds a call for every
+//  option and is also compiled against `os.Logger`; see there.
+//
 //  Read the lines back with
 //
 //      /usr/bin/log show --last 1m --info --debug --style ndjson --predicate 'subsystem == "<subsystem>"'
@@ -56,6 +59,29 @@ func valueTypes() {
     log.notice("no values, 100% literal")
 }
 
+func layoutAndFormats(file: String, size: Int, seconds: Double) {
+    log.notice("|\(file, align: .left(columns: 16))|\(size, align: .right(columns: 10))|")
+    log.notice("read \(size, format: .byteCount) in \(seconds, format: .fixed(precision: 2)) s, flags \(UInt8(0x2A), format: .hex(includePrefix: true))")
+    log.notice("mode \(Int32(0o100644), format: .darwinMode), failed with \(Int32(2), format: .darwinErrno) after \(Int32(15), format: .darwinSignal)")
+    log.notice("hidden, but laid out: |\(file, align: .right(columns: 16), privacy: .private)| \(UInt16(0x2A), format: .hex(includePrefix: true, minDigits: 4), privacy: .private)")
+}
+
+func masks(user: String, token: String) {
+    log.notice("login \(user, privacy: .private(mask: .hash)), once more \(user, privacy: .private(mask: .hash))")
+    log.notice("token \(token, privacy: .sensitive) or \(token, privacy: .sensitive(mask: .hash))")
+}
+
+func rawMemory() {
+    let request: [UInt8] = [0xE6, 0x21, 0xE1, 0xF8, 0xC3, 0x6C, 0x49, 0x5A, 0x93, 0xFC, 0x0C, 0x24, 0x7A, 0x3E, 0x6E, 0x5F]
+    request.withUnsafeBytes { bytes in
+        log.notice("request \(bytes, format: .uuid), first bytes \(bytes.baseAddress!, bytes: 4, privacy: .public)")
+    }
+}
+
+func attributes(size: Int, user: String) {
+    log.notice("\(size, attributes: "bytes") for \(user, attributes: "name=user")")
+}
+
 func levels(runtime level: OSLogType) {
     log.trace("trace")
     log.debug("debug")
@@ -79,5 +105,11 @@ greet("Jupiter")
 report(count: 3, flag: true, error: DemoError.offCourse)
 privacyOptions(user: "jane@example.com", attempts: 3)
 valueTypes()
+layoutAndFormats(file: "report.pdf", size: 1_536_000, seconds: 0.8215)
+masks(user: "jane@example.com", token: "s3cr3t")
+rawMemory()
+attributes(size: 1_536_000, user: "jane@example.com")
 levels(runtime: CommandLine.arguments.count > 2 ? .debug : .info)
 kitAdditions(error: DemoError.offCourse)
+everyOption(log)
+everyPrivacyOption(log)
