@@ -209,6 +209,8 @@ enum Recorded {
 
         /// The message without the kit's tail.
         var text: String { message.components(separatedBy: " ⟦tb1⟧")[0] }
+        /// The kit's tail as it was written, or what is left of it.
+        var tailText: String { message.components(separatedBy: " ⟦tb1⟧").dropFirst().joined(separator: " ⟦tb1⟧") }
         /// The kit's tail, decoded.
         var tail: [String: Any]? {
             let parts = message.components(separatedBy: " ⟦tb1⟧")
@@ -222,6 +224,8 @@ enum Recorded {
     }
 
     static let secret = "Jupiter"
+    /// A tail for the lines that measure what os_log stores.
+    static let limitTail = #"{"f":"Module/File.swift","fn":"function()","ln":1}"#
 
     /// Logs a line that states its own call site, to compare with its tail.
     static func logCallSite(_ kit: tb.Logger) {
@@ -259,6 +263,21 @@ enum Recorded {
             reference.notice("hidden.error.\(sample.name, privacy: .public)|\(sample.error, privacy: .sensitive)|")
             reference.notice("hidden.object.\(sample.name, privacy: .public)|\(sample.error as NSError, privacy: .sensitive)|")
         }
+
+        // What os_log stores of the two values of a line: lines of exactly the
+        // kit's capacity, and lines of a byte more than os_log has ever room for.
+        for (level, size) in [(OSLogType.error, 1008), (.error, 1009), (.fault, 786), (.fault, 1979)] {
+            let start = "limit.\(level.rawValue).\(size) "
+            let text = start + String(repeating: "x", count: size - limitTail.utf8.count - start.utf8.count)
+            reference.log(level: level, "\(text, privacy: .public) ⟦tb1⟧\(limitTail, privacy: .public)")
+        }
+
+        // Lines of the kit that are too long.
+        kit.error("kit.long \(String(repeating: "x", count: 3000), privacy: .public)")
+        kit.fault("kit.long.fault \(String(repeating: "x", count: 3000), privacy: .public)")
+        kit.error("kit.long.wide \(String(repeating: "👋", count: 1000), privacy: .public)")
+        kit.error("kit.long.context \(String(repeating: "x", count: 600), privacy: .public)",
+                  context: ["big": String(repeating: "c", count: 3000)])
 
         kit.error("kit.hidden \(secret)")
         kit.error("kit.public \(secret, privacy: .public)")
@@ -404,6 +423,46 @@ enum Recorded {
         #expect(inMessage.text == "kit.error.sensitive " + reference)
         #expect(fromMethod.text == reference)
         #expect(fromMethod.level == .error)
+    }
+
+    /// os_log stores a line of exactly the size the kit cuts to. If a system
+    /// stores less, this fails before any line of the kit loses its tail
+    /// unnoticed. And the kit does not cut too early: below the fault level a
+    /// line of one byte more is cut by os_log. A fault has more room on a
+    /// short call stack, but never for more than 1978 bytes.
+    @Test func osLogStoresALineOfTheKitsCapacity() throws {
+        #expect(tb.Logger.capacity(for: .error) == 1008 && tb.Logger.capacity(for: .fault) == 786)
+        for (level, fits, tooLong) in [(OSLogType.error, 1008, 1009), (.fault, 786, 1979)] {
+            let whole = try #require(try Recorded.line("os", "limit.\(level.rawValue).\(fits)"), "\(fits)")
+            let cut = try #require(try Recorded.line("os", "limit.\(level.rawValue).\(tooLong)"), "\(tooLong)")
+            #expect(whole.tailText == Recorded.limitTail, "\(fits)")
+            #expect(whole.text.hasSuffix("x"), "\(fits)")
+            #expect(cut.tailText != Recorded.limitTail && cut.message.contains("<…>"), "\(tooLong)")
+        }
+    }
+
+    /// A line that is too long keeps its tail, at every level: the text is
+    /// cut, down to the byte os_log has room for.
+    @Test func aLongLineKeepsItsTail() throws {
+        for (key, level) in [("kit.long", OSLogType.error), ("kit.long.fault", .fault), ("kit.long.wide", .error)] {
+            let line = try #require(try Recorded.line("tb", key), "\(key)")
+            let tail = try #require(line.tail, "\(key): the tail is whole")
+            let used = line.text.utf8.count + line.tailText.utf8.count
+            #expect(tail["fn"] as? String != nil && tail["ln"] as? Int != nil, "\(key)")
+            #expect(line.text.hasSuffix("<…>"), "\(key)")
+            #expect(used <= tb.Logger.capacity(for: level) && used > tb.Logger.capacity(for: level) - 4, "\(key): \(used) bytes")
+        }
+        let wide = try #require(try Recorded.line("tb", "kit.long.wide"))
+        #expect(wide.text.dropFirst("kit.long.wide ".count).dropLast("<…>".count).allSatisfy { $0 == "👋" })
+    }
+
+    /// A context that is too long is left out, and says so; the message stays.
+    @Test func aLongContextIsLeftOutOfTheLine() throws {
+        let line = try #require(try Recorded.line("tb", "kit.long.context"))
+        let tail = try #require(line.tail)
+        #expect(line.text == "kit.long.context " + String(repeating: "x", count: 600))
+        #expect(tail["ctx"] as? [String: String] == ["<…>": "3003 bytes of context left out"])
+        #expect(tail["fn"] as? String != nil && tail["ln"] as? Int != nil)
     }
 
     /// The finished text travels as an argument, never as os_log's format.

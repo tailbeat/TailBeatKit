@@ -158,14 +158,79 @@ public struct Logger: Sendable {
         let reveal = false      // hidden values become `<private>`, or a fingerprint
         let file = fileID       // relative → no absolute path in customer logs
         #endif
-        let text = message().render(revealingHiddenValues: reveal)
-        let tail = Tail(f: file, fn: function, ln: line, ctx: context,
-                        kind: nil, app: nil, ver: nil).encoded()
+        let (text, tail) = Self.fitted(text: message().render(revealingHiddenValues: reveal),
+                                       tail: Tail(f: file, fn: function, ln: line, ctx: context,
+                                                  kind: nil, app: nil, ver: nil),
+                                       capacity: Self.capacity(for: type))
         // The kit has already decided what the line contains, so the finished
         // text is handed over as `.public`: a reader like TailBeat can recover
         // it, and what it recovers does not depend on the reading system.
         // The literal `⟦tb1⟧` sits between the human message and the JSON tail.
         logger.log(level: type, "\(text, privacy: .public) ⟦tb1⟧\(tail, privacy: .public)")
+    }
+
+    // MARK: - Lines that are too long
+    //
+    // os_log stores a limited number of bytes of the values of one message.
+    // What is beyond is cut off, from the end — and the end of a line is its
+    // tail. A line that is too long would so lose the place it came from. The
+    // kit therefore cuts the text itself, before os_log cuts the tail.
+
+    /// How many UTF-8 bytes os_log is sure to store of the two values of a
+    /// line, text and tail together: 1008, and 786 for a fault.
+    ///
+    /// Both are measured. Below the fault level a line of 1008 bytes comes
+    /// back whole from the log store and one of 1009 comes back cut, however
+    /// the bytes are divided between text and tail. A fault has more room,
+    /// 2030 bytes, but shares it with the call stack that os_log stores with
+    /// a fault: up to 59 frames at 5 bytes each, and 16 bytes for every
+    /// different binary among them. That leaves between 786 and 1978 bytes,
+    /// depending on where the call comes from. The kit does not look at the
+    /// stack; it keeps to what fits under every one. The tests repeat the
+    /// measurement for the stack they run on.
+    static func capacity(for type: OSLogType) -> Int {
+        type == .fault ? 786 : 1008
+    }
+
+    /// The mark where a text has been cut. It is the one os_log itself puts
+    /// where it cuts a value.
+    static let cutMark = "<…>"
+
+    /// Text and tail of a line, such that both fit into `capacity` bytes.
+    ///
+    /// The tail is never cut; the text gives way to it. One part of the tail
+    /// gives way first, though: a context that makes the tail longer than
+    /// half the line is left out, with a note in its place, so that a long
+    /// context does not push the message out of its own line.
+    ///
+    /// A call site that is longer than a whole line on its own — a file path
+    /// of about a thousand bytes — is beyond this: the text is then cut down
+    /// to the mark, and os_log cuts the tail.
+    static func fitted(text: String, tail: Tail, capacity: Int) -> (text: String, tail: String) {
+        var encoded = tail.encoded()
+        guard text.utf8.count + encoded.utf8.count > capacity else { return (text, encoded) }
+        if let context = tail.ctx, encoded.utf8.count > capacity / 2 {
+            let size = context.reduce(0) { $0 + $1.key.utf8.count + $1.value.utf8.count }
+            encoded = Tail(f: tail.f, fn: tail.fn, ln: tail.ln, ctx: [cutMark: "\(size) bytes of context left out"],
+                           kind: tail.kind, app: tail.app, ver: tail.ver).encoded()
+        }
+        return (cut(text, toUTF8Count: capacity - encoded.utf8.count), encoded)
+    }
+
+    /// `text` in at most `count` UTF-8 bytes: cut behind a whole character,
+    /// with `cutMark` — counted in — where the rest was. If there is no room
+    /// even for the mark, the mark is all that is left.
+    static func cut(_ text: String, toUTF8Count count: Int) -> String {
+        guard text.utf8.count > count else { return text }
+        let room = count - cutMark.utf8.count
+        var end = text.startIndex, used = 0
+        while end < text.endIndex {
+            let next = text.index(after: end)
+            used += text.utf8.distance(from: end, to: next)
+            if used > room { break }
+            end = next
+        }
+        return String(text[..<end]) + cutMark
     }
 
     /// The structured tail: one JSON object. Fields are written in the order

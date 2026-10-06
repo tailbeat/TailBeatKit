@@ -156,6 +156,113 @@ import Testing
     }
 }
 
+// MARK: - Lines that are too long
+
+@Suite struct LongLineTests {
+    private typealias Tail = tb.Logger.Tail
+
+    private let mark = "<…>"
+    private let callSite = Tail(f: "App/Reader.swift", fn: "read(_:)", ln: 12, ctx: nil, kind: nil, app: nil, ver: nil)
+
+    private func callSite(context: [String: String]) -> Tail {
+        Tail(f: "App/Reader.swift", fn: "read(_:)", ln: 12, ctx: context, kind: nil, app: nil, ver: nil)
+    }
+
+    @Test func theCapacityIsWhatOSLogWasMeasuredToStore() {
+        for level in [OSLogType.debug, .info, .default, .error] {
+            #expect(Logger.capacity(for: level) == 1008)
+        }
+        // A fault shares its room with the call stack os_log stores with it.
+        #expect(Logger.capacity(for: .fault) == 786)
+    }
+
+    @Test func aLineThatFitsIsLeftAlone() {
+        let tail = callSite.encoded()
+        for text in ["", "short", String(repeating: "x", count: 1008 - tail.utf8.count), String(repeating: "é", count: (1008 - tail.utf8.count) / 2)] {
+            let line = Logger.fitted(text: text, tail: callSite, capacity: 1008)
+            #expect(line.text == text)
+            #expect(line.tail == tail)
+        }
+    }
+
+    @Test func aLongTextIsCutToTheByteAndMarked() {
+        let tail = callSite.encoded()
+        for capacity in [1008, 786] {
+            for length in [capacity - tail.utf8.count + 1, capacity, 5000, 100_000] {
+                let line = Logger.fitted(text: String(repeating: "x", count: length), tail: callSite, capacity: capacity)
+                #expect(line.tail == tail)
+                #expect(line.text.utf8.count + line.tail.utf8.count == capacity)
+                #expect(line.text.hasSuffix(mark))
+                #expect(line.text.dropLast(mark.count).allSatisfy { $0 == "x" })
+            }
+        }
+    }
+
+    /// Characters of two, three and four bytes, and characters made of
+    /// several: the cut never falls inside one.
+    @Test func aCutFallsBehindAWholeCharacter() {
+        let tail = callSite.encoded()
+        let characters: [Character] = ["é", "日", "👋", "e\u{301}", "👨‍👩‍👧‍👦", "🇩🇪", "\r\n"]
+        for character in characters {
+            for offset in 0..<character.utf8.count {
+                let text = String(repeating: "x", count: offset) + String(repeating: String(character), count: 1000)
+                let line = Logger.fitted(text: text, tail: callSite, capacity: 1008)
+                let kept = line.text.dropLast(mark.count)
+                #expect(line.text.hasSuffix(mark))
+                #expect(text.hasPrefix(kept), "\(character.debugDescription) at \(offset)")
+                #expect(kept.dropFirst(offset).allSatisfy { $0 == character }, "\(character.debugDescription) at \(offset)")
+                // As much as fits: one more character would be too many.
+                let used = line.text.utf8.count + tail.utf8.count
+                #expect(used <= 1008 && used > 1008 - character.utf8.count, "\(character.debugDescription) at \(offset): \(used)")
+            }
+        }
+    }
+
+    /// A context that makes the tail longer than half the line is left out
+    /// and noted; the tail stays one JSON object and the text keeps its room.
+    @Test func aLongContextGivesWayBeforeTheText() throws {
+        let context = ["request": String(repeating: "r", count: 400), "user": String(repeating: "u", count: 300)]
+        let text = String(repeating: "x", count: 600)
+        let line = Logger.fitted(text: text, tail: callSite(context: context), capacity: 1008)
+        let tail = try #require(try JSONSerialization.jsonObject(with: Data(line.tail.utf8)) as? [String: Any])
+        #expect(line.text == text)
+        #expect(tail["ctx"] as? [String: String] == [mark: "711 bytes of context left out"])
+        #expect(tail["f"] as? String == "App/Reader.swift" && tail["fn"] as? String == "read(_:)" && tail["ln"] as? Int == 12)
+
+        // Still too long without the context: then the text is cut as well.
+        let long = Logger.fitted(text: String(repeating: "x", count: 5000), tail: callSite(context: context), capacity: 1008)
+        #expect(long.tail == line.tail)
+        #expect(long.text.hasSuffix(mark) && long.text.utf8.count + long.tail.utf8.count == 1008)
+    }
+
+    /// A context that leaves the text half the line stays, and the text is
+    /// cut around it.
+    @Test func aContextOfModestSizeStays() throws {
+        let context = ["request": String(repeating: "r", count: 300)]
+        let line = Logger.fitted(text: String(repeating: "x", count: 5000), tail: callSite(context: context), capacity: 1008)
+        let tail = try #require(try JSONSerialization.jsonObject(with: Data(line.tail.utf8)) as? [String: Any])
+        #expect(tail["ctx"] as? [String: String] == context)
+        #expect(line.text.hasSuffix(mark) && line.text.utf8.count + line.tail.utf8.count == 1008)
+        // And where everything fits, a long context is nobody's business.
+        let fits = Logger.fitted(text: "short", tail: callSite(context: ["request": String(repeating: "r", count: 800)]), capacity: 1008)
+        #expect(fits.text == "short" && fits.tail.contains(String(repeating: "r", count: 800)))
+    }
+
+    /// The tail is never cut by the kit. A call site that is longer than a
+    /// line on its own leaves only the mark of the text; what os_log then
+    /// does to the tail is out of the kit's hands.
+    @Test func aCallSiteLongerThanALineIsNotCut() {
+        let endless = Tail(f: String(repeating: "/directory", count: 150), fn: "read(_:)", ln: 12, ctx: ["k": "v"], kind: nil, app: nil, ver: nil)
+        let line = Logger.fitted(text: "some text", tail: endless, capacity: 1008)
+        #expect(line.text == mark)
+        #expect(line.tail.contains(String(repeating: "/directory", count: 150)) && line.tail.hasSuffix("}"))
+        #expect(Logger.cut("some text", toUTF8Count: 3) == mark)
+        #expect(Logger.cut("some text", toUTF8Count: 0) == mark)
+        #expect(Logger.cut("some text", toUTF8Count: 9) == "some text")
+        #expect(Logger.cut("some text", toUTF8Count: 8) == "som" + mark)
+    }
+}
+
 // MARK: - Tail
 
 @Suite struct TailTests {
