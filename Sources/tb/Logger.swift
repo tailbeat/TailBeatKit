@@ -28,11 +28,12 @@ import os
 ///
 /// Swap `import os` for `import tb`; the call sites stay as they are. The
 /// initializers, the method names, their levels and the message syntax —
-/// including `privacy:` — match `os.Logger`.
+/// with `privacy:`, `align:`, `format:` and `attributes:` — match `os.Logger`.
 ///
 /// What differs is who hides a value. The kit renders the message itself:
-/// a hidden value is written out in a debug build and as `<private>` in every
-/// other build. See `OSLogPrivacy`.
+/// a value that is hidden by `.private` or by its type is written out in a
+/// debug build and as `<private>` in every other build, and a `.sensitive`
+/// value is written out in none. See `OSLogPrivacy`.
 public struct Logger: Sendable {
     /// Sentinel that marks the structured tail in a message. Versioned so the
     /// format can evolve without breaking older readers.
@@ -150,10 +151,10 @@ public struct Logger: Sendable {
                       _ fileID: String, _ filePath: String, _ function: String, _ line: Int) {
         guard logger.isEnabled(type: type) else { return }
         #if DEBUG
-        let reveal = true       // hidden values are written out
+        let reveal = true       // what `.private` and `.auto` hide is written out
         let file = filePath     // absolute → TailBeat click-to-open on the dev machine
         #else
-        let reveal = false      // hidden values become `<private>`
+        let reveal = false      // hidden values become `<private>`, or a fingerprint
         let file = fileID       // relative → no absolute path in customer logs
         #endif
         let text = message().render(revealingHiddenValues: reveal)

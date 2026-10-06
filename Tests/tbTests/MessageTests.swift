@@ -42,6 +42,15 @@ import Testing
         log.info("\(UInt8(count), format: .hex(includePrefix: true)) \(0.5, format: .fixed(precision: 2)) \(flag, format: .answer)")
         log.info("\(UInt16(count), format: .octal, align: .none, privacy: .public) \(Float(0.5), format: .exponential, privacy: .private)")
 
+        // Masks, special formats, raw memory and attributes.
+        log.info("\(planet, privacy: .private(mask: .hash)) \(planet, privacy: .sensitive(mask: .hash)) \(count, privacy: .auto(mask: .none))")
+        log.info("\(count, format: .byteCount) \(Int32(count), format: .darwinErrno, privacy: .public) \(2, format: .darwinSignal)")
+        withUnsafeBytes(of: count) { bytes in
+            log.info("\(bytes) \(bytes, format: .none, privacy: .public) \(bytes.baseAddress!, bytes: 4, format: .uuid, privacy: .private)")
+        }
+        log.info("\(planet, attributes: "name=planet") \(count, format: .decimal, align: .none, privacy: .public, attributes: "bytes")")
+        log.info("\(error, privacy: .public, attributes: "x") \(type(of: self), attributes: "x") \(0.5, attributes: "x") \(count, format: .bitrate, attributes: "x")")
+
         // The kit's additions sit behind the message.
         log.warning("with context", context: ["request": "42"])
         log.error(error)
@@ -60,8 +69,15 @@ import Testing
 
         #expect(message.render(revealingHiddenValues: false) == "explicit <private>")
         #expect(OSLogMessage(stringInterpolation: interpolation).render(revealingHiddenValues: false) == "n=7")
+        let masked: OSLogMessage = "\("value", privacy: OSLogPrivacy.private(mask: OSLogPrivacy.Mask.none))"
+        let special: OSLogMessage = "\(1000, format: OSLogIntExtendedFormat.byteCount) \(Int32(2), format: OSLogInt32ExtendedFormat.truth)"
+        let memory: OSLogMessage = withUnsafeBytes(of: UInt8(7)) { "\($0, format: OSLogPointerFormat.none, privacy: .public)" }
+
         #expect(aligned.render(revealingHiddenValues: false) == "  007")
         #expect(formatted.render(revealingHiddenValues: false) == "ff 0.5 YES")
+        #expect(masked.render(revealingHiddenValues: false) == "<private>")
+        #expect(special.render(revealingHiddenValues: false) == "1 kB true")
+        #expect(memory.render(revealingHiddenValues: false) == "'07'")
     }
 
     @Test func initializersMatchOSLogger() {

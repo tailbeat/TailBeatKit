@@ -146,6 +146,26 @@ struct Sample: Sendable, CustomTestStringConvertible {
         Sample(name: "Bool.false", text: "false", shownByDefault: true,
                message: { p in let v = false; return p.map { "\(v, privacy: $0)" } ?? "\(v)" },
                reference: { log in let v = false; log.notice("auto.Bool.false \(v)"); log.notice("public.Bool.false \(v, privacy: .public)") }),
+
+        // Numbers in a special format stay numbers; raw memory is hidden like text
+        Sample(name: "Bool.answer", text: "YES", shownByDefault: true,
+               message: { p in let v = true; return p.map { "\(v, format: .answer, privacy: $0)" } ?? "\(v, format: .answer)" },
+               reference: { log in let v = true; log.notice("auto.Bool.answer \(v, format: .answer)"); log.notice("public.Bool.answer \(v, format: .answer, privacy: .public)") }),
+        Sample(name: "Int.byteCount", text: "1.54 MB", shownByDefault: true,
+               message: { p in let v = 1_536_000; return p.map { "\(v, format: .byteCount, privacy: $0)" } ?? "\(v, format: .byteCount)" },
+               reference: { log in let v = 1_536_000; log.notice("auto.Int.byteCount \(v, format: .byteCount)"); log.notice("public.Int.byteCount \(v, format: .byteCount, privacy: .public)") }),
+        Sample(name: "Int32.darwinErrno", text: "[2: No such file or directory]", shownByDefault: true,
+               message: { p in let v: Int32 = 2; return p.map { "\(v, format: .darwinErrno, privacy: $0)" } ?? "\(v, format: .darwinErrno)" },
+               reference: { log in let v: Int32 = 2; log.notice("auto.Int32.darwinErrno \(v, format: .darwinErrno)"); log.notice("public.Int32.darwinErrno \(v, format: .darwinErrno, privacy: .public)") }),
+        Sample(name: "Memory", text: "'DE AD BE EF 01'", shownByDefault: false,
+               message: { p in Memory.with(Memory.bytes) { v in p.map { "\(v, privacy: $0)" } ?? "\(v)" } },
+               reference: { log in Memory.with(Memory.bytes) { v in log.notice("auto.Memory \(v)"); log.notice("public.Memory \(v, privacy: .public)") } }),
+        Sample(name: "Memory.pointer", text: "'DE AD BE'", shownByDefault: false,
+               message: { p in Memory.with(Memory.bytes) { v in p.map { "\(v.baseAddress!, bytes: 3, privacy: $0)" } ?? "\(v.baseAddress!, bytes: 3)" } },
+               reference: { log in Memory.with(Memory.bytes) { v in log.notice("auto.Memory.pointer \(v.baseAddress!, bytes: 3)"); log.notice("public.Memory.pointer \(v.baseAddress!, bytes: 3, privacy: .public)") } }),
+        Sample(name: "Memory.uuid", text: "E621E1F8-C36C-495A-93FC-0C247A3E6E5F", shownByDefault: false,
+               message: { p in Memory.with(Memory.uuid) { v in p.map { "\(v, format: .uuid, privacy: $0)" } ?? "\(v, format: .uuid)" } },
+               reference: { log in Memory.with(Memory.uuid) { v in log.notice("auto.Memory.uuid \(v, format: .uuid)"); log.notice("public.Memory.uuid \(v, format: .uuid, privacy: .public)") } }),
     ]
 }
 
@@ -156,17 +176,18 @@ struct Sample: Sendable, CustomTestStringConvertible {
     /// build passes as `true` and every other build as `false`.
     @Test(arguments: Sample.all)
     func everyPrivacyOptionInBothBuilds(sample: Sample) {
-        let options: [(privacy: tb.OSLogPrivacy?, shown: Bool)] = [
-            (nil, sample.shownByDefault),
-            (.auto, sample.shownByDefault),
-            (.public, true),
-            (.private, false),
-            (.sensitive, false),
+        // What each option writes in a build that hides, and in one that reveals.
+        let options: [(privacy: tb.OSLogPrivacy?, hiding: Bool, revealing: Bool)] = [
+            (nil, sample.shownByDefault, true),
+            (.auto, sample.shownByDefault, true),
+            (.public, true, true),
+            (.private, false, true),
+            (.sensitive, false, false),         // hidden in every build
         ]
         for option in options {
             let message = sample.message(option.privacy)
-            #expect(message.render(revealingHiddenValues: true) == sample.text)
-            #expect(message.render(revealingHiddenValues: false) == (option.shown ? sample.text : "<private>"))
+            #expect(message.render(revealingHiddenValues: true) == (option.revealing ? sample.text : "<private>"))
+            #expect(message.render(revealingHiddenValues: false) == (option.hiding ? sample.text : "<private>"))
         }
     }
 }
@@ -215,9 +236,25 @@ enum Recorded {
             option.reference(reference)
             if index % 50 == 49 { Thread.sleep(forTimeInterval: 0.05) }     // leave the log some air
         }
+        Sweep.reference(reference)
+
+        // Hidden values, as this system writes them.
+        reference.notice("privacy.private|\(secret, privacy: .private)|")
+        reference.notice("privacy.sensitive|\(secret, privacy: .sensitive)|")
+        reference.notice("privacy.sensitive.number|\(42, privacy: .sensitive)|")
+        reference.notice("privacy.private.hash|\(secret, privacy: .private(mask: .hash))|")
+        reference.notice("privacy.sensitive.hash|\(secret, privacy: .sensitive(mask: .hash))|")
+        reference.notice("privacy.auto.hash|\(secret, privacy: .auto(mask: .hash))|")
+        reference.notice("privacy.sensitive.aligned|\(secret, align: .right(columns: 12), privacy: .sensitive)|")
+        reference.notice("privacy.sensitive.prefix|\(UInt(255), format: .hex(explicitPositiveSign: true, includePrefix: true), privacy: .sensitive)|")
+        reference.notice("privacy.sensitive.hash.prefix|\(UInt(255), format: .hex(includePrefix: true), privacy: .sensitive(mask: .hash))|")
+        reference.notice("privacy.sensitive.hash.aligned|\(secret, align: .right(columns: 40), privacy: .sensitive(mask: .hash))|")
+        reference.notice("privacy.sensitive.hash.three|\(secret, privacy: .sensitive(mask: .hash))|\(secret, privacy: .sensitive(mask: .hash))|\("Saturn", privacy: .sensitive(mask: .hash))|")
 
         kit.error("kit.hidden \(secret)")
         kit.error("kit.public \(secret, privacy: .public)")
+        kit.error("kit.sensitive \(secret, privacy: .sensitive)")
+        kit.error("kit.options \(secret, align: .right(columns: 9), privacy: .public) \(UInt(255), format: .hex(includePrefix: true)) \(1_536_000, format: .byteCount)")
         kit.error("kit.literal 100% %s %@ %{public}s %d")
         logCallSite(kit)
         tb.Logger(subsystem: subsystem, category: "tb.error").error(CocoaError(.fileNoSuchFile))
@@ -259,26 +296,31 @@ enum Recorded {
         try lines.get().first { $0.category == category && ($0.text == key || $0.text.hasPrefix(key + " ")) }
     }
 
-    /// What `os.Logger` wrote for the value of the option called `name`: the
-    /// text between the bars of `option.<name>|<value>|`.
-    static func option(_ name: String) throws -> String? {
-        let start = "option.\(name)|"
+    /// What `os.Logger` wrote between the bars of the line `<key>|<text>|`.
+    static func reference(_ key: String) throws -> String? {
+        let start = key + "|"
         return try lines.get().first { $0.category == "os" && $0.message.hasPrefix(start) }
             .map { String($0.message.dropFirst(start.count).dropLast()) }
+    }
+
+    /// What `os.Logger` wrote for the value of the option called `name`.
+    static func option(_ name: String) throws -> String? {
+        try reference("option." + name)
     }
 }
 
 @Suite struct OSLoggerParityTests {
     /// os_log leaves a value unredacted when the format carries no privacy flag
-    /// and the value is a number; text (`%s`) and objects (`%@`) are redacted
-    /// unless flagged public. `.auto` has to agree for every kind of value.
+    /// and the value is a number; text (`%s`), objects (`%@`) and raw memory
+    /// (`%.*P`) are redacted unless flagged public. `.auto` has to agree for
+    /// every kind of value.
     @Test(arguments: Sample.all)
     func autoShowsWhatOSLoggerLeavesUnredacted(sample: Sample) throws {
         let line = try #require(try Recorded.line("os", "auto.\(sample.name)"))
         let placeholder = line.rest(of: line.format)
         #expect(!placeholder.contains("public") && !placeholder.contains("private") && !placeholder.contains("sensitive"),
                 "os.Logger stores no privacy flag for a value without an option")
-        let redactedByOSLog = placeholder.hasSuffix("s") || placeholder.hasSuffix("@")
+        let redactedByOSLog = placeholder.hasSuffix("s") || placeholder.hasSuffix("@") || placeholder.hasSuffix("P")
         #expect(sample.shownByDefault == !redactedByOSLog, "os.Logger stores \(placeholder)")
     }
 
@@ -330,6 +372,15 @@ enum Recorded {
         #expect(shown.text == "kit.public Jupiter")
         #expect(publicError.text == description)
         #expect(error.level == .error)
+    }
+
+    /// In every build: a sensitive value is not written, and options reach
+    /// the finished line.
+    @Test func theFinishedLineCarriesWhatTheMessageRendered() throws {
+        let sensitive = try #require(try Recorded.line("tb", "kit.sensitive"))
+        let options = try #require(try Recorded.line("tb", "kit.options"))
+        #expect(sensitive.text == "kit.sensitive <private>")
+        #expect(options.text == "kit.options   Jupiter 0xff 1.54 MB")
     }
 
     /// The finished text travels as an argument, never as os_log's format.

@@ -3,7 +3,8 @@
 //  tb
 //
 //  os_log's layout and number options: `align:`, and the `format:` of whole
-//  numbers, floating-point numbers and booleans.
+//  numbers, floating-point numbers and booleans. The special formats, raw
+//  memory and attributes continue the table in ValueFormatTests.swift.
 //
 //  Every entry of the table was first logged through `os.Logger`; its `text`
 //  is what the log store gave back. The tests hold the kit to that text, and
@@ -43,6 +44,7 @@ struct Option: Sendable, CustomTestStringConvertible {
     var testDescription: String { name }
 
     static let all = decimal + hex + octal + alignedWholeNumbers + floatingPoint + booleans + text
+        + specialInt + specialInt32 + memory + attributes
 }
 
 extension Option {
@@ -501,6 +503,8 @@ extension Option {
 
     @Test(arguments: Option.all)
     func osLoggerWritesWhatTheTableSays(option: Option) throws {
+        // `os` itself has the time format for an `Int` only from version 26 on.
+        if #unavailable(macOS 26, iOS 26), option.name.hasPrefix("int.secondsSince1970") { return }
         #expect(try #require(try Recorded.option(option.name)) == option.text)
     }
 
