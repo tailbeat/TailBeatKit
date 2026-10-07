@@ -28,6 +28,7 @@ import Testing
         log.warning("warning")
         log.error("error")
         log.error(CocoaError(.fileNoSuchFile))
+        log.critical("critical")
         log.fault("fault")
         log.log("default")
         log.log(level: .info, "with context", context: ["request": "42"])
@@ -74,7 +75,7 @@ import Testing
         let marker = "tb-marker-\(UUID().uuidString)"
         let since = Date().addingTimeInterval(-5)
 
-        tb.Logger(subsystem: subsystem, category: category).error(marker)
+        tb.Logger(subsystem: subsystem, category: category).error("\(marker, privacy: .public)")
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("tb-export-\(UUID().uuidString).ndjson")
